@@ -1,0 +1,14 @@
+{
+  "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/Llvm/x64/bin/clang++.exe" : 
+  {
+    "hash" : "b8b2c4e8f31347e4838b4d9c01f261a8179f8322",
+    "size" : 101889600,
+    "timestamp" : 1766194271
+  },
+  "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/Llvm/x64/bin/clang.exe" : 
+  {
+    "hash" : "59fc26c051d0a502b0872bb5242aa6923e23d8cb",
+    "size" : 101889600,
+    "timestamp" : 1766194276
+  }
+}

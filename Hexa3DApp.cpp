@@ -7,8 +7,9 @@
 #include <ctime>
 #include <vector>
 #include <string>
+#include <numbers>
 
-constexpr float PI = 3.14159265359f;
+constexpr float PI = 3.14159265358979323846f;
 
 struct HexTile {
     float x, y, z;

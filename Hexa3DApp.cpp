@@ -5,6 +5,8 @@
 #include "GLFW/glfw3.h"
 #include <cmath>
 #include <ctime>
+#include <cstdio>
+#include <cstring>
 #include <array>
 #include <vector>
 
@@ -27,6 +29,7 @@ const float sy = 1.5f * R;
 struct Cell { int type, value; };
 // type: 0=empty  1=month(1-12)  2=weekday(0=Sun..6=Sat)  3=date(1-31)
 enum { CT_EMPTY = 0, CT_MONTH = 1, CT_WDAY = 2, CT_DATE = 3 };
+GLuint FONT_BASE = 0;   // bitmap-font display-list base; set after GL context is created
 
 // 9-row layout (row 4 = centre, y = 0)
 //
@@ -83,6 +86,15 @@ void setPerspective(float fovy, float aspect, float zNear, float zFar)
     glFrustum(-fW, fW, -fH, fH, zNear, zFar);
 }
 
+void glText(const std::array<char, 4>& text)
+{
+    if (FONT_BASE == 0) return;
+    glRasterPos3f(0.0f, 0.0f, 0.01f);
+    int len = (int)strlen(text.data());
+    glListBase(FONT_BASE - 32);
+    glCallLists(len, GL_UNSIGNED_BYTE, text.data());
+}
+
 void CreateHexVertices(GLenum cap, double radius)
 {
 	glBegin(cap);
@@ -111,9 +123,10 @@ void drawHex(float			cx,
 	}
 	std::array<char, 4> text {};
 	switch (content.type) {
-		case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; } break;
-		case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; } break;
-		case CT_DATE:  { r *= 0.4f; g *= 0.4f; b *= 0.4f; } break;
+		case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1];	} break;
+		case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value];		} break;
+		case CT_DATE: { snprintf(text.data(), text.size(), "%d", content.value);				} break;
+		case CT_EMPTY: { r *= 0.3f; g *= 0.3f; b *= 0.3f;										} break;
 	}
     // Filled polygon – pushed back slightly so the border line renders on top
     glEnable(GL_POLYGON_OFFSET_FILL);
@@ -122,7 +135,10 @@ void drawHex(float			cx,
 	CreateHexVertices(GL_POLYGON, radius);
     glDisable(GL_POLYGON_OFFSET_FILL);
 
-    // Border 2.0 times brighter than the fill colour.
+	glColor3f(1.0f, 1.0f, 1.0f);
+	glText(text);
+
+	// Border 2.0 times brighter
     glColor3f(r * 2.0f, g * 2.0f, b * 2.0f);
     glLineWidth(1.5f);
 	CreateHexVertices(GL_LINE_LOOP, radius);
@@ -146,6 +162,17 @@ int main()
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable VSync
+#ifdef _WIN32
+    FONT_BASE = glGenLists(96);
+    HFONT hFont = CreateFont(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, TEXT("Courier New"));
+    HDC hdc = wglGetCurrentDC();
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+    wglUseFontBitmaps(hdc, 32, 96, FONT_BASE);
+    SelectObject(hdc, hOldFont);
+    DeleteObject(hFont);
+#endif
 
     glViewport(0, 0, 800, 600);
     glEnable(GL_DEPTH_TEST);
@@ -203,12 +230,13 @@ int main()
         glTranslatef(0.0f, 0.0f, -10.0f);
         glRotatef(0.0f, 1.0f, 0.0f, 0.0f);
         for (const auto& tile : tiles) {
-			if (!tile.empty) {
-				drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
-			}
+			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
         }
         glfwSwapBuffers(window);
     }
+    #ifdef _WIN32
+    glDeleteLists(FONT_BASE, 96);
+#endif
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

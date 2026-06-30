@@ -21,14 +21,15 @@ constexpr float PI = 3.14159265358979323846f;
 	//   1% gap: draw each tile at 99 % of its spacing radius
 	// -----------------------------------------------------------------------
 const float R = 0.5f;
-const float drawR = R * 0.99f;               // 1% gap
+const float baseR = R * 8.5f;     // The total radius of the whole board (from centre to outer edge)
+const float drawR = R * 0.99f;    // 1% gap
 const float sx = sqrtf(3.0f) * R;
 const float sy = 1.5f * R;
 
 // Cell descriptor -------------------------------------------------------
 struct Cell { int type, value; };
-// type: 0=empty  1=month(1-12)  2=weekday(0=Sun..6=Sat)  3=date(1-31)
-enum { CT_EMPTY = 0, CT_MONTH = 1, CT_WDAY = 2, CT_DATE = 3 };
+// type: -1=base, 0=empty,  1=month(1-12),  2=weekday(0=Sun..6=Sat),  3=date(1-31)
+enum { CT_BASE = -1, CT_EMPTY = 0, CT_MONTH = 1, CT_WDAY = 2, CT_DATE = 3 };
 GLuint FONT_BASE = 0;   // bitmap-font display-list base; set after GL context is created
 
 // 9-row layout (row 4 = centre, y = 0)
@@ -95,56 +96,68 @@ void glText(const std::array<char, 4>& text)
     glCallLists(len, GL_UNSIGNED_BYTE, text.data());
 }
 
-void CreateHexVertices(GLenum cap, double radius)
-{
-	glBegin(cap);
-	for (int i = 0; i < 6; ++i) {
-		float angle = PI / 3.0f * (i + 0.5);
-		glVertex3f(radius * cosf(angle), radius * sinf(angle), 0.0f);
+namespace {
+	void CreateHexVertices(GLenum cap, double radius, double rotation = PI / 6.0f)
+	{
+		glBegin(cap);
+		for (int i = 0; i < 6; ++i) {
+			float angle = PI / 3.0f * i + rotation;
+			glVertex3f(radius * cosf(angle), radius * sinf(angle), 0.0f);
+		}
+		glEnd();
 	}
-	glEnd();
-}
 
-void drawHex(float			cx,
-			 float			cy,
-			 float			cz,
-			 float			radius,
-			 bool			highlight,
-			 Cell const &	content)
-{
-    glPushMatrix();
-    glTranslatef(cx, cy, cz);
+	void drawHex(float			cx,
+				 float			cy,
+				 float			cz,
+				 float			radius,
+				 bool			highlight,
+				 Cell const&	content)
+	{
+		glPushMatrix();
+		glTranslatef(cx, cy, cz);
 
-    float r, g, b;
-	if (highlight) {
-		{ r = 1.0f; g = 0.7f; b = 0.2f; }
-	} else {
-		{ r = 0.3f; g = 0.6f; b = 0.8f; }
+		float r, g, b;
+		if (highlight) {
+			r = 1.0f; g = 0.7f; b = 0.2f;
+		} else {
+			r = 0.3f; g = 0.6f; b = 0.8f;
+		}
+		std::array<char, 4> text{};
+		switch (content.type) {
+			case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1]; } break;
+			case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value]; } break;
+			case CT_DATE:  { r *= 0.4f; g *= 0.4f; b *= 0.4f; snprintf(text.data(), text.size(), "%d", content.value); } break;
+			case CT_EMPTY: { r  = 1.0f; g *= 1.0f; b *= 0.0f; } break;
+			case CT_BASE:  { r  = 1.0f; g  = 1.0f; b  = 0.0f; } break;
+		}
+		// Filled polygon – pushed back slightly so the border line renders on top
+		glEnable(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset(1.0f, 1.0f);
+		glColor3f(r, g, b);
+		if (content.type == CT_BASE) {
+			CreateHexVertices(GL_POLYGON, radius, 0.0f);
+		} else if (content.type != CT_EMPTY) {
+			CreateHexVertices(GL_POLYGON, radius);
+		}
+		glDisable(GL_POLYGON_OFFSET_FILL);
+
+		if (content.type != CT_BASE && content.type != CT_EMPTY) {
+			// Text in white
+			glColor3f(1.0f, 1.0f, 1.0f);
+			glPushMatrix();
+			glTranslatef((strlen(text.data()) > 1 ? -0.1f : 0.0f), 0.0, 0.0f);
+			glText(text);
+			glPopMatrix();
+
+			// Border 2.0 times brighter, but not exceeding 1.0
+			glColor3f(r * 2.0f, g * 2.0f, b * 2.0f);
+			glLineWidth(1.5f);
+			CreateHexVertices(GL_LINE_LOOP, radius);
+		}
+		glPopMatrix();
 	}
-	std::array<char, 4> text {};
-	switch (content.type) {
-		case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1];	} break;
-		case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value];		} break;
-		case CT_DATE: { snprintf(text.data(), text.size(), "%d", content.value);				} break;
-		case CT_EMPTY: { r *= 0.3f; g *= 0.3f; b *= 0.3f;										} break;
-	}
-    // Filled polygon – pushed back slightly so the border line renders on top
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(1.0f, 1.0f);
-    glColor3f(r, g, b);
-	CreateHexVertices(GL_POLYGON, radius);
-    glDisable(GL_POLYGON_OFFSET_FILL);
-
-	glColor3f(1.0f, 1.0f, 1.0f);
-	glText(text);
-
-	// Border 2.0 times brighter
-    glColor3f(r * 2.0f, g * 2.0f, b * 2.0f);
-    glLineWidth(1.5f);
-	CreateHexVertices(GL_LINE_LOOP, radius);
-
-    glPopMatrix();
-}
+} // namespace
 
 int main()
 {
@@ -216,12 +229,11 @@ int main()
         }
     }
 
-    // Set projection once before the loop
+	// Set projection once before the loop
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     setPerspective(45.0f, 800.0f / 600.0f, 1.0f, 100.0f);
-
-    // Main loop
+	// Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -229,12 +241,14 @@ int main()
         glLoadIdentity();
         glTranslatef(0.0f, 0.0f, -10.0f);
         glRotatef(0.0f, 1.0f, 0.0f, 0.0f);
-        for (const auto& tile : tiles) {
+
+		drawHex(0.0f, 0.0f, -0.01f, baseR, false, { CT_BASE, 0 });
+		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
         }
         glfwSwapBuffers(window);
     }
-    #ifdef _WIN32
+#ifdef _WIN32
     glDeleteLists(FONT_BASE, 96);
 #endif
     glfwDestroyWindow(window);

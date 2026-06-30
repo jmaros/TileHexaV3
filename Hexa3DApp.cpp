@@ -9,6 +9,8 @@
 #include <cstring>
 #include <array>
 #include <vector>
+#include <map>
+#include <unordered_map>
 
 constexpr float PI = 3.14159265358979323846f;
 
@@ -89,7 +91,7 @@ struct PieceDefinition {
 	float                              r, g, b;
 };
 
-const std::vector<PieceDefinition> FinalPieceDefinitions = {
+const std::vector<PieceDefinition> PieceDefinitions = {
 	{ 'A', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{3.0f*sx,0.0f},{4.0f*sx,0.0f}}, 1.0f,1.0f,0.3f },
 	{ 'B', {{0.0f,0.0f},{1.0f*sx,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
 	{ 'C', {{-1.0f*sx,0.0f},{0.0f,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
@@ -181,69 +183,168 @@ namespace {
 		glPopMatrix();
 	}
 
+	// Forward declaration so drawPiecePreviews can always resolve this helper.
+	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius);
+
+	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius)
+{
+    struct QPoint {
+        int x;
+        int y;
+        bool operator==(const QPoint& o) const noexcept { return x == o.x && y == o.y; }
+    };
+    struct QPointHash {
+        size_t operator()(const QPoint& p) const noexcept {
+            return (static_cast<size_t>(static_cast<unsigned int>(p.x)) << 1) ^
+                   static_cast<size_t>(static_cast<unsigned int>(p.y));
+        }
+    };
+    struct EdgeKey {
+        QPoint a;
+        QPoint b;
+        bool operator==(const EdgeKey& o) const noexcept { return a == o.a && b == o.b; }
+    };
+    struct EdgeKeyHash {
+        size_t operator()(const EdgeKey& e) const noexcept {
+            return QPointHash{}(e.a) * 1315423911u ^ QPointHash{}(e.b);
+        }
+    };
+
+    auto quantizePoint = [](float x, float y) -> QPoint {
+        constexpr float Q = 10000.0f;
+        return { static_cast<int>(lroundf(x * Q)), static_cast<int>(lroundf(y * Q)) };
+    };
+    auto makeEdgeKey = [](QPoint p1, QPoint p2) -> EdgeKey {
+        if (p2.y < p1.y || (p2.y == p1.y && p2.x < p1.x)) {
+            QPoint t = p1; p1 = p2; p2 = t;
+        }
+        return { p1, p2 };
+    };
+
+    std::unordered_map<EdgeKey, int, EdgeKeyHash> edgeUseCount;
+
+    for (const auto& c : centers) {
+        for (int i = 0; i < 6; ++i) {
+            float a1 = PI / 3.0f * (i + 0.5f);
+            float a2 = PI / 3.0f * ((i + 1) % 6 + 0.5f);
+            QPoint p1 = quantizePoint(c.first + radius * cosf(a1), c.second + radius * sinf(a1));
+            QPoint p2 = quantizePoint(c.first + radius * cosf(a2), c.second + radius * sinf(a2));
+            edgeUseCount[makeEdgeKey(p1, p2)]++;
+        }
+    }
+
+    std::unordered_map<QPoint, std::vector<QPoint>, QPointHash> adjacency;
+    for (const auto& kv : edgeUseCount) {
+        if (kv.second == 1) {
+            adjacency[kv.first.a].push_back(kv.first.b);
+            adjacency[kv.first.b].push_back(kv.first.a);
+        }
+    }
+    if (adjacency.empty()) return;
+
+    QPoint start = adjacency.begin()->first;
+    for (const auto& kv : adjacency) {
+        const QPoint& p = kv.first;
+        if (p.y < start.y || (p.y == start.y && p.x < start.x)) start = p;
+    }
+
+    std::vector<QPoint> loop;
+    loop.reserve(adjacency.size() + 1);
+    QPoint prev{ 0x7fffffff, 0x7fffffff };
+    QPoint cur = start;
+
+    for (size_t guard = 0; guard < adjacency.size() + 8; ++guard) {
+        loop.push_back(cur);
+        const auto& nbr = adjacency[cur];
+        if (nbr.empty()) break;
+        QPoint next = nbr[0];
+        if (nbr.size() > 1 && next == prev) next = nbr[1];
+        prev = cur;
+        cur = next;
+        if (cur == start) {
+            loop.push_back(start);
+            break;
+        }
+    }
+
+    constexpr float Q = 10000.0f;
+    glLineWidth(1.4f);
+    glBegin(GL_LINE_STRIP);
+    for (const auto& p : loop) {
+        glVertex3f(p.x / Q, p.y / Q, 0.0f);
+    }
+    glEnd();
+}
+
 	void drawPiecePreviews(const std::vector<PieceDefinition>& pieces)
 	{
-		const float pR     = drawR;   // real size – same hex radius as the board
-		const float startX[3] = { -8.0f, 0.0, 8.0f };   // left/middle/right of board (board ends ~3.5) + separation
-		const float gap    = 0.5f;   // vertical gap between successive pieces
+    const float pR = drawR;
+    const float fillR = pR * 1.015f; // tiny overlap to hide internal raster seams
 
-		float curY = 6.5f;           // current top-of-piece cursor (world space)
+    auto pieceAnchor = [](char label) -> std::pair<float, float> {
+        switch (label) {
+            // left side: A..E top -> down
+            case 'A': return { -6.6f,  6.1f };
+            case 'B': return { -6.6f,  3.9f };
+            case 'C': return { -6.6f,  1.7f };
+            case 'D': return { -6.6f, -0.5f };
+            case 'E': return { -6.6f, -2.7f };
 
-		for (const auto& p : pieces) {
-			float minY =  1e9f, maxY = -1e9f;
-			for (const auto& rc : p.offsets) {
-				minY = fminf(minY, rc.second);
-				maxY = fmaxf(maxY, rc.second);
-			}
+            // bottom middle: F
+            case 'F': return { -0.2f, -4.5f };
 
-			// Anchor: top of bounding box (+ hex radius) sits at curY
+            // right side: G..K bottom -> up
+            case 'G': return {  6.1f, -5.0f };
+            case 'H': return {  6.1f, -2.6f };
+            case 'I': return {  6.1f, -0.2f };
+            case 'J': return {  6.1f,  2.2f };
+            case 'K': return {  6.1f,  4.8f };
+            default:  return {  6.0f,  0.0f };
+        }
+    };
 
+    for (const auto& p : pieces) {
+        float minY =  1e9f, maxY = -1e9f;
+        for (const auto& rc : p.offsets) {
+            minY = fminf(minY, rc.second);
+            maxY = fmaxf(maxY, rc.second);
+        }
 
-			size_t dpRow = p.label < 'F' ? 0 : (p.label == 'F' ? 1 : 2);
-			switch (dpRow) {
-				case 1: curY += ((maxY - minY) + 3.0f * pR + gap) / 2.0F; break;
-				default: break;
-			}
+        auto anc = pieceAnchor(p.label);
+        const float ox = anc.first;
+        const float oy = anc.second;
 
-			float oy = curY - maxY - pR;
-			const float* ox = startX;
-			for (const auto& rc : p.offsets) {
-				float px = rc.first + ox[dpRow];
-				float py = rc.second + oy;
+        std::vector<std::pair<float, float>> pieceCenters;
+        pieceCenters.reserve(p.offsets.size());
 
-				glPushMatrix();
-				glTranslatef(px, py, 0.0f);
+        for (const auto& rc : p.offsets) {
+            float px = rc.first  + ox;
+            float py = rc.second + oy;
+            pieceCenters.push_back({ px, py });
 
-				glEnable(GL_POLYGON_OFFSET_FILL);
-				glPolygonOffset(1.0f, 1.0f);
-				glColor3f(p.r * 0.7f, p.g * 0.7f, p.b * 0.7f);
-				CreateHexVertices(GL_POLYGON, pR);
-				glDisable(GL_POLYGON_OFFSET_FILL);
+            glPushMatrix();
+            glTranslatef(px, py, 0.0f);
 
-				glColor3f(p.r, p.g, p.b);
-				glLineWidth(1.0f);
-				CreateHexVertices(GL_LINE_LOOP, pR);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
+            glColor3f(p.r * 0.7f, p.g * 0.7f, p.b * 0.7f);
+            CreateHexVertices(GL_POLYGON, fillR);
+            glDisable(GL_POLYGON_OFFSET_FILL);
 
-				glPopMatrix();
-			}
+            glPopMatrix();
+        }
 
-			// Label to the left of the piece, vertically centred
-			std::array<char, 4> lbl{};
-			lbl[0] = p.label;
-			glPushMatrix();
-			glTranslatef(ox[dpRow] - 2.5f, oy + (minY + maxY) * 0.5f, 0.0f);
-			glColor3f(1.0f, 1.0f, 1.0f);
-			glText(lbl);
-			glPopMatrix();
+        glColor3f(p.r, p.g, p.b);
+        drawPieceOuterOutline(pieceCenters, pR);
 
-			// Advance cursor below this piece's bounding box
-			switch (dpRow) {
-				case 0: curY -= (maxY - minY) + 3.0f * pR + gap; break;
-				case 1: curY -= ((maxY - minY) + 3.0f * pR/* + gap*/) / 2.0; break;
-				case 2: curY += (maxY - minY) + 3.0f * pR + gap; break;
-				default: break;
-			}
-		}
+        std::array<char, 4> lbl{};
+        lbl[0] = p.label;
+        glPushMatrix();
+        glTranslatef(ox - 0.9f, oy + (minY + maxY) * 0.5f, 0.0f);
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glText(lbl);
+        glPopMatrix();
+    }
 	}
 } // namespace
 
@@ -334,7 +435,7 @@ int main()
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
         }
-		drawPiecePreviews(FinalPieceDefinitions);
+		drawPiecePreviews(PieceDefinitions);
         glfwSwapBuffers(window);
     }
 #ifdef _WIN32

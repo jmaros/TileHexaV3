@@ -304,10 +304,11 @@ namespace {
     };
 
     for (const auto& p : pieces) {
-        float minY =  1e9f, maxY = -1e9f;
+        float tlX = p.offsets[0].first, tlY = p.offsets[0].second;
         for (const auto& rc : p.offsets) {
-            minY = fminf(minY, rc.second);
-            maxY = fmaxf(maxY, rc.second);
+            if (rc.second > tlY || (rc.second == tlY && rc.first < tlX)) {
+                tlX = rc.first; tlY = rc.second;
+            }
         }
 
         auto anc = pieceAnchor(p.label);
@@ -317,10 +318,14 @@ namespace {
         std::vector<std::pair<float, float>> pieceCenters;
         pieceCenters.reserve(p.offsets.size());
 
+        float minCY = 1e9f, maxCY = -1e9f;
+
         for (const auto& rc : p.offsets) {
-            float px = rc.first  + ox;
-            float py = rc.second + oy;
+            float px = rc.first  - tlX + ox;
+            float py = rc.second - tlY + oy;
             pieceCenters.push_back({ px, py });
+            minCY = fminf(minCY, py);
+            maxCY = fmaxf(maxCY, py);
 
             glPushMatrix();
             glTranslatef(px, py, 0.0f);
@@ -335,12 +340,12 @@ namespace {
         }
 
         glColor3f(p.r, p.g, p.b);
-        drawPieceOuterOutline(pieceCenters, pR);
+        drawPieceOuterOutline(pieceCenters, R);
 
         std::array<char, 4> lbl{};
         lbl[0] = p.label;
         glPushMatrix();
-        glTranslatef(ox - 0.9f, oy + (minY + maxY) * 0.5f, 0.0f);
+        glTranslatef(ox - 0.9f, (minCY + maxCY) * 0.5f, 0.0f);
         glColor3f(1.0f, 1.0f, 1.0f);
         glText(lbl);
         glPopMatrix();

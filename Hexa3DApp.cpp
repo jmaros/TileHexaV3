@@ -80,6 +80,37 @@ struct HexTile {
 	bool empty;       // true = no content, skip rendering
 };
 
+// -----------------------------------------------------------------------
+// Puzzle-piece preview data (Solution 1)
+// -----------------------------------------------------------------------
+const int rowWidths[9] = { 5, 6, 7, 8, 9, 8, 7, 6, 5 };
+
+static std::pair<float, float> cellToWorld(int row, int col) {
+    float x = (col - (rowWidths[row] - 1) * 0.5f) * sx;
+    float y = (4 - row) * sy;
+    return { x, y };
+}
+
+struct Piece {
+    char                             label;
+    std::vector<std::pair<int, int>> cells;  // (row, col) in grid coords
+    float                            r, g, b;
+};
+
+const std::vector<Piece> solution1 = {
+    { 'A', {{0,0},{1,0},{2,0},{3,0},{4,0}},                 1.0f,0.3f,0.3f },
+    { 'B', {{0,2},{1,1},{1,2},{2,1},{2,2}},                 0.3f,1.0f,0.3f },
+    { 'C', {{3,2},{4,3},{5,3},{6,2},{7,2}},                 0.3f,0.5f,1.0f },
+    { 'D', {{1,5},{2,6},{3,7},{4,8},{5,7}},                 1.0f,1.0f,0.3f },
+    { 'E', {{3,3},{4,4},{4,5},{5,4},{5,5},{6,5}},           1.0f,0.3f,1.0f },
+    { 'F', {{6,0},{6,1},{7,0},{7,1},{8,0},{8,1}},           0.3f,1.0f,1.0f },
+    { 'G', {{6,3},{6,4},{7,3},{7,4},{8,3}},                 1.0f,0.6f,0.3f },
+    { 'H', {{2,3},{3,4},{3,5},{3,6},{4,7}},                 0.3f,1.0f,0.6f },
+    { 'I', {{4,6},{5,6},{6,6},{7,5},{8,4}},                 0.6f,0.3f,1.0f },
+    { 'J', {{0,3},{0,4},{1,4},{2,4},{2,5}},                 1.0f,0.3f,0.6f },
+    { 'K', {{3,1},{4,1},{4,2},{5,0},{5,1},{5,2}},           0.6f,1.0f,0.3f },
+};
+
 void setPerspective(float fovy, float aspect, float zNear, float zFar)
 {
     float fH = tan(fovy / 360.0f * PI) * zNear;
@@ -156,6 +187,65 @@ namespace {
 			CreateHexVertices(GL_LINE_LOOP, radius);
 		}
 		glPopMatrix();
+	}
+
+	void drawPiecePreviews(const std::vector<Piece>& pieces)
+	{
+		const float scale   = 0.35f;
+		const float pR      = drawR * scale;
+		const float startX  = 4.5f;
+		const float startY  = 3.75f;
+		const float spacing = 0.75f;
+
+		for (int i = 0; i < (int)pieces.size(); ++i) {
+			const Piece& p = pieces[i];
+
+			std::vector<std::pair<float, float>> wc;
+			float cx = 0.f, cy = 0.f;
+			for (const auto& cell : p.cells) {
+				auto wp = cellToWorld(cell.first, cell.second);
+				wc.push_back(wp);
+				cx += wp.first;
+				cy += wp.second;
+			}
+			cx /= (float)wc.size();
+			cy /= (float)wc.size();
+
+			const float ox = startX;
+			const float oy = startY - i * spacing;
+
+			for (const auto& w : wc) {
+				float rx = (w.first  - cx) * scale;
+				float ry = (w.second - cy) * scale;
+				// 90 deg CW rotation: (rx, ry) -> (ry, -rx)
+				float px = ry + ox;
+				float py = -rx + oy;
+
+				glPushMatrix();
+				glTranslatef(px, py, 0.0f);
+				glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+
+				glEnable(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset(1.0f, 1.0f);
+				glColor3f(p.r * 0.7f, p.g * 0.7f, p.b * 0.7f);
+				CreateHexVertices(GL_POLYGON, pR);
+				glDisable(GL_POLYGON_OFFSET_FILL);
+
+				glColor3f(p.r, p.g, p.b);
+				glLineWidth(1.0f);
+				CreateHexVertices(GL_LINE_LOOP, pR);
+
+				glPopMatrix();
+			}
+
+			std::array<char, 4> lbl{};
+			lbl[0] = p.label;
+			glPushMatrix();
+			glTranslatef(ox - 0.55f, oy - 0.05f, 0.0f);
+			glColor3f(1.0f, 1.0f, 1.0f);
+			glText(lbl);
+			glPopMatrix();
+		}
 	}
 } // namespace
 
@@ -246,6 +336,7 @@ int main()
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
         }
+        drawPiecePreviews(solution1);
         glfwSwapBuffers(window);
     }
 #ifdef _WIN32

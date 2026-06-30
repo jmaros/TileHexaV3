@@ -79,7 +79,6 @@ struct HexTile {
 	float x, y, z;
 	bool highlight;
 	Cell content;
-	bool empty;       // true = no content, skip rendering
 };
 
 // -----------------------------------------------------------------------
@@ -153,7 +152,7 @@ namespace {
 			case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1]; } break;
 			case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value]; } break;
 			case CT_DATE:  { r *= 0.4f; g *= 0.4f; b *= 0.4f; snprintf(text.data(), text.size(), "%d", content.value); } break;
-			case CT_EMPTY: { r  = 1.0f; g *= 1.0f; b *= 0.0f; } break;
+			case CT_EMPTY: { r *= 0.6f; g *= 0.6f; b *= 0.0f; } break;
 			case CT_BASE:  { r  = 1.0f; g  = 1.0f; b  = 0.0f; } break;
 		}
 		// Filled polygon – pushed back slightly so the border line renders on top
@@ -171,7 +170,9 @@ namespace {
 			// Text in white
 			glColor3f(1.0f, 1.0f, 1.0f);
 			glPushMatrix();
-			glTranslatef((strlen(text.data()) > 1 ? -0.1f : 0.0f), 0.0, 0.0f);
+			double x1 = (strlen(text.data()) > 1 ? -0.18f : 0.0f);
+			double x2 = (strlen(text.data()) > 2 ? -0.28f : x1);
+			glTranslatef(x2, 0.0, 0.0f);
 			glText(text);
 			glPopMatrix();
 
@@ -256,7 +257,7 @@ namespace {
     for (size_t guard = 0; guard < adjacency.size() + 8; ++guard) {
         loop.push_back(cur);
         const auto& nbr = adjacency[cur];
-        if (nbr.empty()) break;
+        //if (nbr.empty()) break;
         QPoint next = nbr[0];
         if (nbr.size() > 1 && next == prev) next = nbr[1];
         prev = cur;
@@ -284,21 +285,21 @@ namespace {
     auto pieceAnchor = [](char label) -> std::pair<float, float> {
         switch (label) {
             // left side: A..E top -> down
-            case 'A': return { -6.6f,  6.1f };
-            case 'B': return { -6.6f,  3.9f };
-            case 'C': return { -6.6f,  1.7f };
-            case 'D': return { -6.6f, -0.5f };
-            case 'E': return { -6.6f, -2.7f };
+            case 'A': return { -9.6f,  5.6f };
+            case 'B': return { -9.6f,  2.9f };
+            case 'C': return { -9.6f,  0.0f };
+            case 'D': return { -9.6f, -3.5f };
+            case 'E': return { -9.6f, -5.7f };
 
             // bottom middle: F
-            case 'F': return { -0.2f, -4.5f };
+            case 'F': return { -0.2f, -5.5f };
 
             // right side: G..K bottom -> up
-            case 'G': return {  6.1f, -5.0f };
+            case 'G': return {  6.1f, -6.0f };
             case 'H': return {  6.1f, -2.6f };
             case 'I': return {  6.1f, -0.2f };
-            case 'J': return {  6.1f,  2.2f };
-            case 'K': return {  6.1f,  4.8f };
+            case 'J': return {  6.1f,  3.2f };
+            case 'K': return {  6.1f,  6.2f };
             default:  return {  6.0f,  0.0f };
         }
     };
@@ -419,7 +420,7 @@ int main()
                 case CT_WDAY:  hl = (c.value == wday);  break;
                 case CT_DATE:  hl = (c.value == today);  break;
             }
-            tiles.push_back({x, y, 0.0f, hl, c, c.type == CT_EMPTY});
+            tiles.push_back({x, y, 0.0f, hl, c});
         }
     }
 

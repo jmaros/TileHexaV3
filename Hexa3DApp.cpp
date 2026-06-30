@@ -253,10 +253,13 @@ namespace {
 				float nx = bx * cosE - by * sinE;   // additional per-piece CCW rotation
 				float ny = bx * sinE + by * cosE;
 
-			// Per-piece mirror requests
-			if (p.label == 'E' || p.label == 'F' || p.label == 'I') {
-				ny = -ny; // mirror to horizontal axis
-			}
+				// Per-piece mirror requests
+				if (p.label == 'D') {
+					nx = -nx; // mirror to horizontal axis
+				}
+				if (p.label == 'D' || p.label == 'E' || p.label == 'F' || p.label == 'I') {
+					ny = -ny; // mirror to horizontal axis
+				}
 
 				rot.push_back({nx, ny});
 				minY = fminf(minY, ny);
@@ -300,7 +303,7 @@ namespace {
 			std::array<char, 4> lbl{};
 			lbl[0] = p.label;
 			glPushMatrix();
-			glTranslatef(ox[dpRow] - 0.65f, oy + (minY + maxY) * 0.5f, 0.0f);
+			glTranslatef(ox[dpRow] - 2.5f, oy + (minY + maxY) * 0.5f, 0.0f);
 			glColor3f(1.0f, 1.0f, 1.0f);
 			glText(lbl);
 			glPopMatrix();

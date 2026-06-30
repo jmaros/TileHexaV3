@@ -254,7 +254,7 @@ namespace {
 				float ny = bx * sinE + by * cosE;
 
 			// Per-piece mirror requests
-			if (p.label == 'I') {
+			if (p.label == 'E' || p.label == 'F' || p.label == 'I') {
 				ny = -ny; // mirror to horizontal axis
 			}
 

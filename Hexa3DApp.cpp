@@ -98,17 +98,31 @@ struct Piece {
 };
 
 const std::vector<Piece> solution1 = {
-    { 'A', {{0,0},{1,0},{2,0},{3,0},{4,0}},                 1.0f,0.3f,0.3f },
-    { 'B', {{0,2},{1,1},{1,2},{2,1},{2,2}},                 0.3f,1.0f,0.3f },
-    { 'C', {{3,2},{4,3},{5,3},{6,2},{7,2}},                 0.3f,0.5f,1.0f },
+    { 'A', {{0,0},{1,0},{2,0},{3,0},{4,0}},                 1.0f,1.0f,0.3f },
+    { 'B', {{0,2},{1,1},{1,2},{2,1},{2,2}},                 1.0f,1.0f,0.3f },
+    { 'C', {{3,2},{4,3},{5,3},{6,2},{7,2}},                 1.0f,1.0f,0.3f },
     { 'D', {{1,5},{2,6},{3,7},{4,8},{5,7}},                 1.0f,1.0f,0.3f },
-    { 'E', {{3,3},{4,4},{4,5},{5,4},{5,5},{6,5}},           1.0f,0.3f,1.0f },
-    { 'F', {{6,0},{6,1},{7,0},{7,1},{8,0},{8,1}},           0.3f,1.0f,1.0f },
-    { 'G', {{6,3},{6,4},{7,3},{7,4},{8,3}},                 1.0f,0.6f,0.3f },
-    { 'H', {{2,3},{3,4},{3,5},{3,6},{4,7}},                 0.3f,1.0f,0.6f },
-    { 'I', {{4,6},{5,6},{6,6},{7,5},{8,4}},                 0.6f,0.3f,1.0f },
-    { 'J', {{0,3},{0,4},{1,4},{2,4},{2,5}},                 1.0f,0.3f,0.6f },
-    { 'K', {{3,1},{4,1},{4,2},{5,0},{5,1},{5,2}},           0.6f,1.0f,0.3f },
+    { 'E', {{3,3},{4,4},{4,5},{5,4},{5,5},{6,5}},           1.0f,1.0f,0.3f },
+    { 'F', {{6,0},{6,1},{7,0},{7,1},{8,0},{8,1}},           1.0f,1.0f,0.3f },
+    { 'G', {{6,3},{6,4},{7,3},{7,4},{8,3}},                 1.0f,1.0f,0.3f },
+    { 'H', {{2,3},{3,4},{3,5},{3,6},{4,7}},                 1.0f,1.0f,0.3f },
+    { 'I', {{4,6},{5,6},{6,6},{7,5},{8,4}},                 1.0f,1.0f,0.3f },
+    { 'J', {{0,3},{0,4},{1,4},{2,4},{2,5}},                 1.0f,1.0f,0.3f },
+    { 'K', {{3,1},{4,1},{4,2},{5,0},{5,1},{5,2}},           1.0f,1.0f,0.3f },
+};
+
+const std::vector<Piece> PieceDefinitions = {
+	{ 'A', {{0,0},{1,0},{2,0},{3,0},{4,0}},                 1.0f,1.0f,0.3f },
+	{ 'B', {{0,2},{1,1},{1,2},{2,1},{2,2}},                 1.0f,1.0f,0.3f },
+	{ 'C', {{3,2},{4,3},{5,3},{6,2},{7,2}},                 1.0f,1.0f,0.3f },
+	{ 'D', {{1,5},{2,6},{3,7},{4,8},{5,7}},                 1.0f,1.0f,0.3f },
+	{ 'E', {{3,3},{4,4},{4,5},{5,4},{5,5},{6,5}},           1.0f,1.0f,0.3f },
+	{ 'F', {{6,0},{6,1},{7,0},{7,1},{8,0},{8,1}},           1.0f,1.0f,0.3f },
+	{ 'G', {{6,3},{6,4},{7,3},{7,4},{8,3}},                 1.0f,1.0f,0.3f },
+	{ 'H', {{2,3},{3,4},{3,5},{3,6},{4,7}},                 1.0f,1.0f,0.3f },
+	{ 'I', {{4,6},{5,6},{6,6},{7,5},{8,4}},                 1.0f,1.0f,0.3f },
+	{ 'J', {{0,3},{0,4},{1,4},{2,4},{2,5}},                 1.0f,1.0f,0.3f },
+	{ 'K', {{3,1},{4,1},{4,2},{5,0},{5,1},{5,2}},           1.0f,1.0f,0.3f },
 };
 
 void setPerspective(float fovy, float aspect, float zNear, float zFar)
@@ -189,41 +203,85 @@ namespace {
 		glPopMatrix();
 	}
 
+	// Returns the CCW rotation angle in degrees for each piece
+	static float getPieceAngle(char label) {
+		switch (label) {
+			case 'A': case 'B':                                return  30.0f;
+			case 'C': case 'D': case 'E': case 'F': case 'G':  return -30.0f;
+			case 'H':                                          return  90.0f;
+			case 'I':                                          return  30.0f;
+			case 'J':                                          return  90.0f;
+			case 'K':                                          return  30.0f;
+			default:                                           return   0.0f;
+		}
+	}
+
 	void drawPiecePreviews(const std::vector<Piece>& pieces)
 	{
-		const float scale   = 0.35f;
-		const float pR      = drawR * scale;
-		const float startX  = 4.5f;
-		const float startY  = 3.75f;
-		const float spacing = 0.75f;
+		const float pR     = drawR;   // real size – same hex radius as the board
+		const float startX[3] = { -8.0f, 0.0, 8.0f };   // left/middle/right of board (board ends ~3.5) + separation
+		const float gap    = 0.5f;   // vertical gap between successive pieces
 
-		for (int i = 0; i < (int)pieces.size(); ++i) {
-			const Piece& p = pieces[i];
+		float curY = 6.5f;           // current top-of-piece cursor (world space)
 
-			std::vector<std::pair<float, float>> wc;
+		for (const auto& p : pieces) {
+			// Per-piece CCW rotation angle
+			float extra = getPieceAngle(p.label) * PI / 180.0f;
+			float cosE  = cosf(extra);
+			float sinE  = sinf(extra);
+
+			// World-space positions and centroid
+			std::vector<std::pair<float,float>> wc;
 			float cx = 0.f, cy = 0.f;
 			for (const auto& cell : p.cells) {
 				auto wp = cellToWorld(cell.first, cell.second);
 				wc.push_back(wp);
-				cx += wp.first;
-				cy += wp.second;
+				cx += wp.first;  cy += wp.second;
 			}
 			cx /= (float)wc.size();
 			cy /= (float)wc.size();
 
-			const float ox = startX;
-			const float oy = startY - i * spacing;
-
+			// Step 1: 90° CW base rotation — restores the correct horizontal piece shape
+			// Step 2: per-piece extra CCW rotation on top
+			std::vector<std::pair<float,float>> rot;
+			float minY =  1e9f, maxY = -1e9f;
 			for (const auto& w : wc) {
-				float rx = (w.first  - cx) * scale;
-				float ry = (w.second - cy) * scale;
-				// 90 deg CW rotation: (rx, ry) -> (ry, -rx)
-				float px = ry + ox;
-				float py = -rx + oy;
+				float rx = w.first  - cx;
+				float ry = w.second - cy;
+				float bx =  ry;            // 90° CW: (rx,ry) → (ry,−rx)
+				float by = -rx;
+				float nx = bx * cosE - by * sinE;   // additional per-piece CCW rotation
+				float ny = bx * sinE + by * cosE;
+
+			// Per-piece mirror requests
+			if (p.label == 'I') {
+				ny = -ny; // mirror to horizontal axis
+			}
+
+				rot.push_back({nx, ny});
+				minY = fminf(minY, ny);
+				maxY = fmaxf(maxY, ny);
+			}
+
+			// Anchor: top of bounding box (+ hex radius) sits at curY
+
+
+			size_t dpRow = p.label < 'F' ? 0 : (p.label == 'F' ? 1 : 2);
+			switch (dpRow) {
+				case 1: curY += ((maxY - minY) + 3.0f * pR + gap) / 2.0F; break;
+				default: break;
+			}
+
+			float oy = curY - maxY - pR;
+			const float* ox = startX;
+			for (const auto& rc : rot) {
+				float px = rc.first + ox[dpRow];
+				float py = rc.second + oy;
 
 				glPushMatrix();
 				glTranslatef(px, py, 0.0f);
-				glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+				// No glRotatef – hexagons keep pointy-top orientation
+				// so their left and right sides are vertical
 
 				glEnable(GL_POLYGON_OFFSET_FILL);
 				glPolygonOffset(1.0f, 1.0f);
@@ -238,13 +296,22 @@ namespace {
 				glPopMatrix();
 			}
 
+			// Label to the left of the piece, vertically centred
 			std::array<char, 4> lbl{};
 			lbl[0] = p.label;
 			glPushMatrix();
-			glTranslatef(ox - 0.55f, oy - 0.05f, 0.0f);
+			glTranslatef(ox[dpRow] - 0.65f, oy + (minY + maxY) * 0.5f, 0.0f);
 			glColor3f(1.0f, 1.0f, 1.0f);
 			glText(lbl);
 			glPopMatrix();
+
+			// Advance cursor below this piece's bounding box
+			switch (dpRow) {
+				case 0: curY -= (maxY - minY) + 3.0f * pR + gap; break;
+				case 1: curY -= ((maxY - minY) + 3.0f * pR/* + gap*/) / 2.0; break;
+				case 2: curY += (maxY - minY) + 3.0f * pR + gap; break;
+				default: break;
+			}
 		}
 	}
 } // namespace
@@ -329,14 +396,14 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
-        glTranslatef(0.0f, 0.0f, -10.0f);
+        glTranslatef(0.0f, 0.0f, -20.0f);
         glRotatef(0.0f, 1.0f, 0.0f, 0.0f);
 
 		drawHex(0.0f, 0.0f, -0.01f, baseR, false, { CT_BASE, 0 });
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
         }
-        drawPiecePreviews(solution1);
+        drawPiecePreviews(PieceDefinitions);
         glfwSwapBuffers(window);
     }
 #ifdef _WIN32

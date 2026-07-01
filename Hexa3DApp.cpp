@@ -148,7 +148,7 @@ namespace {
 				 float			cz,
 				 float			radius,
 				 bool			highlight,
-				 Cell const&	content)
+				 Cell const& content)
 	{
 		glPushMatrix();
 		glTranslatef(cx, cy, cz);
@@ -162,10 +162,10 @@ namespace {
 		std::array<char, 4> text{};
 		switch (content.type) {
 			case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1]; } break;
-			case CT_WDAY:  { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value]; } break;
-			case CT_DATE:  { r *= 0.4f; g *= 0.4f; b *= 0.4f; snprintf(text.data(), text.size(), "%d", content.value); } break;
-			case CT_EMPTY: { r *= 0.6f; g *= 0.6f; b *= 0.0f; } break;
-			case CT_BASE:  { r  = 1.0f; g  = 1.0f; b  = 0.0f; } break;
+			case CT_WDAY: { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value]; } break;
+			case CT_DATE: { r *= 0.4f; g *= 0.4f; b *= 0.4f; snprintf(text.data(), text.size(), "%d", content.value); } break;
+			case CT_EMPTY: { r = 0.82f; g = 0.74f; b = 0.18f; } break; // empty playable cell: no text, yellow-brown shade
+			case CT_BASE: { r = 1.0f; g = 1.0f; b = 0.0f; } break;
 		}
 		// Filled polygon – pushed back slightly so the border line renders on top
 		glEnable(GL_POLYGON_OFFSET_FILL);
@@ -173,12 +173,17 @@ namespace {
 		glColor3f(r, g, b);
 		if (content.type == CT_BASE) {
 			CreateHexVertices(GL_POLYGON, radius, 0.0f);
-		} else if (content.type != CT_EMPTY) {
+		} else {
 			CreateHexVertices(GL_POLYGON, radius);
 		}
 		glDisable(GL_POLYGON_OFFSET_FILL);
 
-		if (content.type != CT_BASE && content.type != CT_EMPTY) {
+		if (content.type == CT_EMPTY) {
+			// Empty cells are visible hexagons, but without text.
+			glColor3f(0.95f, 0.88f, 0.25f);
+			glLineWidth(1.1f);
+			CreateHexVertices(GL_LINE_LOOP, radius);
+		} else if (content.type != CT_BASE) {
 			// Text in white
 			glColor3f(1.0f, 1.0f, 1.0f);
 			glPushMatrix();
@@ -197,9 +202,9 @@ namespace {
 	}
 
 	// Forward declaration so drawPiecePreviews can always resolve this helper.
-	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius);
+	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z = 0.0f);
 
-	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius)
+	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z)
 	{
 		struct QPoint {
 			int x;
@@ -285,10 +290,10 @@ namespace {
 		}
 
 		constexpr float Q = 10000.0f;
-		glLineWidth(1.4f);
+		glLineWidth(1.8f);
 		glBegin(GL_LINE_STRIP);
 		for (const auto& p : loop) {
-			glVertex3f(p.x / Q, p.y / Q, 0.0f);
+			glVertex3f(p.x / Q, p.y / Q, z);
 		}
 		glEnd();
 	}
@@ -312,12 +317,12 @@ namespace {
 					case 'F': return { -0.2f, -5.5f };
 
 					// right side: G..K bottom -> up
-					case 'G': return {  6.1f, -6.0f };
-					case 'H': return {  6.1f, -2.6f };
-					case 'I': return {  6.1f, -0.2f };
-					case 'J': return {  6.1f,  3.2f };
-					case 'K': return {  6.1f,  6.2f };
-					default:  return {  6.0f,  0.0f };
+					case 'G': return { 6.1f, -6.0f };
+					case 'H': return { 6.1f, -2.6f };
+					case 'I': return { 6.1f, -0.2f };
+					case 'J': return { 6.1f,  3.2f };
+					case 'K': return { 6.1f,  6.2f };
+					default:  return { 6.0f,  0.0f };
 				}
 			};
 
@@ -358,7 +363,7 @@ namespace {
 			}
 
 			glColor3f(p.r, p.g, p.b);
-			drawPieceOuterOutline(pieceCenters, R);
+			drawPieceOuterOutline(pieceCenters, R, 0.07f);
 
 			std::array<char, 4> lbl{};
 			lbl[0] = p.label;
@@ -373,6 +378,7 @@ namespace {
 
 	struct PlacementCandidate {
 		bool valid = false;
+		bool outsideBoard = false; // true when the anchor or any piece hex is not on the board
 		std::vector<int> cells;
 		float snapX = 0.0f;
 		float snapY = 0.0f;
@@ -380,13 +386,32 @@ namespace {
 
 	struct PieceState {
 		const PieceDefinition* def = nullptr;
-		// Local hex-centre offsets in world units.  The first/top-left cell is
-		// the invisible drag handle, but we do not draw an extra marker for it.
+		// Local hex-centre offsets in world units.  Any hex can be grabbed;
+		// the original upper-left cell remains the local anchor.
 		std::vector<std::pair<float, float>> offsets;
 		float x = 0.0f;                   // world position of the upper-left handle cell
 		float y = 0.0f;
 		bool placed = false;
 		std::vector<int> occupiedCells;
+		float homeX = 0.0f;
+		float homeY = 0.0f;
+		std::vector<std::pair<float, float>> homeOffsets;
+		std::vector<std::pair<float, float>> ghostCenters; // permanent grey footprint of the original start position
+	};
+
+	struct PieceSnapshot {
+		float x = 0.0f;
+		float y = 0.0f;
+		bool placed = false;
+		std::vector<std::pair<float, float>> offsets;
+		std::vector<int> occupiedCells;
+		std::vector<std::pair<float, float>> ghostCenters;
+	};
+
+	struct MoveHistoryEntry {
+		int pieceIndex = -1;
+		PieceSnapshot before;
+		PieceSnapshot after;
 	};
 
 	struct AppState {
@@ -403,15 +428,20 @@ namespace {
 		float savedY = 0.0f;
 		std::vector<std::pair<float, float>> savedOffsets;
 		std::vector<int> savedCells;
-		std::vector<std::pair<float, float>> ghostCenters; // grey frozen footprint of the original position
+		std::vector<std::pair<float, float>> savedGhostCenters;
+		PieceSnapshot beforeDragSnapshot;
 		std::pair<float, float> dragLocal{ 0.0f, 0.0f }; // local centre of the hex being held
 		PlacementCandidate target;
 		bool solved = false;
-		bool showHelp = true;
+		bool showHelp = false;
 		int protectedCellCount = 0;
+		std::vector<MoveHistoryEntry> undoStack;
+		std::vector<MoveHistoryEntry> redoStack;
 	};
 
 	static AppState* gApp = nullptr;
+
+	static bool checkSolved(const AppState& app);
 
 	static std::pair<float, float> pieceHomeAnchor(char label)
 	{
@@ -422,12 +452,12 @@ namespace {
 			case 'D': return { -9.6f, -3.5f };
 			case 'E': return { -9.6f, -5.7f };
 			case 'F': return { -0.2f, -5.5f };
-			case 'G': return {  6.1f, -6.0f };
-			case 'H': return {  6.1f, -2.6f };
-			case 'I': return {  6.1f, -0.2f };
-			case 'J': return {  6.1f,  3.2f };
-			case 'K': return {  6.1f,  6.2f };
-			default:  return {  6.0f,  0.0f };
+			case 'G': return { 6.1f, -6.0f };
+			case 'H': return { 6.1f, -2.6f };
+			case 'I': return { 6.1f, -0.2f };
+			case 'J': return { 6.1f,  3.2f };
+			case 'K': return { 6.1f,  6.2f };
+			default:  return { 6.0f,  0.0f };
 		}
 	}
 
@@ -468,16 +498,18 @@ namespace {
 		return result;
 	}
 
-	enum class PieceTransform { RotateCW, MirrorX };
+	enum class PieceTransform { RotateCW, RotateCCW, MirrorX };
 
 	static std::pair<float, float> transformedPoint(const std::pair<float, float>& c, PieceTransform tr)
 	{
 		float x = c.first;
 		float y = c.second;
-		if (tr == PieceTransform::RotateCW) {
-			// Pure geometric 60-degree clockwise rotation.
+		if (tr == PieceTransform::RotateCW || tr == PieceTransform::RotateCCW) {
+			// Pure geometric 60-degree rotation around the held hex.
 			const float cs = 0.5f;
-			const float sn = -0.86602540378443864676f; // sin(-60 deg)
+			const float sn = (tr == PieceTransform::RotateCW)
+				? -0.86602540378443864676f   // sin(-60 deg)
+				: 0.86602540378443864676f;  // sin(+60 deg)
 			return { cs * x - sn * y, sn * x + cs * y };
 		}
 		// Left-right mirror.  On this pointy-top hex grid x -> -x keeps all
@@ -539,6 +571,11 @@ namespace {
 		applyPieceTransform(p, PieceTransform::RotateCW);
 	}
 
+	static void rotatePieceCounterClockwise(PieceState& p)
+	{
+		applyPieceTransform(p, PieceTransform::RotateCCW);
+	}
+
 	static void mirrorPiece(PieceState& p)
 	{
 		applyPieceTransform(p, PieceTransform::MirrorX);
@@ -552,6 +589,18 @@ namespace {
 			centers.push_back({ p.x + c.first, p.y + c.second });
 		}
 		return centers;
+	}
+
+	static PieceSnapshot makeSnapshot(const PieceState& p)
+	{
+		PieceSnapshot s;
+		s.x = p.x;
+		s.y = p.y;
+		s.placed = p.placed;
+		s.offsets = p.offsets;
+		s.occupiedCells = p.occupiedCells;
+		s.ghostCenters = p.ghostCenters;
+		return s;
 	}
 
 	static std::pair<float, float> screenToWorld(double sxPos, double syPos)
@@ -591,6 +640,28 @@ namespace {
 		app.pieces[pieceIndex].placed = false;
 	}
 
+	static void applySnapshot(AppState& app, int pieceIndex, const PieceSnapshot& s)
+	{
+		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
+		clearPieceOccupancy(app, pieceIndex);
+		PieceState& p = app.pieces[pieceIndex];
+		p.x = s.x;
+		p.y = s.y;
+		p.offsets = s.offsets;
+		p.placed = s.placed;
+		p.occupiedCells = s.occupiedCells;
+		p.ghostCenters = s.ghostCenters;
+		if (p.placed) {
+			for (int c : p.occupiedCells) {
+				if (c >= 0 && c < static_cast<int>(app.occupancy.size())) {
+					app.occupancy[c] = pieceIndex;
+				}
+			}
+		}
+		app.selectedPiece = pieceIndex;
+		app.solved = checkSolved(app);
+	}
+
 	static PlacementCandidate computePlacementCandidate(const AppState& app, const PieceState& p)
 	{
 		PlacementCandidate result;
@@ -598,7 +669,10 @@ namespace {
 		const auto& tiles = *app.tiles;
 
 		int anchorCell = nearestCell(tiles, p.x, p.y, R * 0.90f);
-		if (anchorCell < 0) return result;
+		if (anchorCell < 0) {
+			result.outsideBoard = true;
+			return result;
+		}
 
 		result.snapX = tiles[anchorCell].x;
 		result.snapY = tiles[anchorCell].y;
@@ -610,6 +684,7 @@ namespace {
 			int ci = nearestCell(tiles, cx, cy, R * 0.25f);
 			if (ci < 0) {
 				result.valid = false;
+				result.outsideBoard = true;
 				return result;
 			}
 			if (std::find(result.cells.begin(), result.cells.end(), ci) != result.cells.end()) {
@@ -655,6 +730,29 @@ namespace {
 		return true;
 	}
 
+	static bool snapshotsEqual(const PieceSnapshot& a, const PieceSnapshot& b)
+	{
+		return a.x == b.x &&
+			a.y == b.y &&
+			a.placed == b.placed &&
+			a.offsets == b.offsets &&
+			a.occupiedCells == b.occupiedCells &&
+			a.ghostCenters == b.ghostCenters;
+	}
+
+	static void restorePieceToHome(AppState& app, int pieceIndex)
+	{
+		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
+		clearPieceOccupancy(app, pieceIndex);
+		PieceState& p = app.pieces[pieceIndex];
+		p.x = p.homeX;
+		p.y = p.homeY;
+		p.offsets = p.homeOffsets;
+		p.placed = false;
+		p.occupiedCells.clear();
+		// p.ghostCenters intentionally remains the permanent original home silhouette.
+	}
+
 	static void restoreDraggedPiece(AppState& app, int pieceIndex)
 	{
 		PieceState& p = app.pieces[pieceIndex];
@@ -663,6 +761,8 @@ namespace {
 		p.offsets = app.savedOffsets;
 		p.placed = app.savedPlaced;
 		p.occupiedCells = app.savedCells;
+		// Keep the grey footprint created at drag start.  It should remain visible
+		// after an invalid drop or after a successful move.
 		if (p.placed) {
 			for (int c : p.occupiedCells) {
 				if (c >= 0 && c < static_cast<int>(app.occupancy.size())) {
@@ -686,6 +786,24 @@ namespace {
 			}
 		}
 		return freeCells == app.protectedCellCount;
+	}
+
+	static void undoLastMove(AppState& app)
+	{
+		if (app.dragging || app.undoStack.empty()) return;
+		MoveHistoryEntry h = app.undoStack.back();
+		app.undoStack.pop_back();
+		applySnapshot(app, h.pieceIndex, h.before);
+		app.redoStack.push_back(h);
+	}
+
+	static void redoLastMove(AppState& app)
+	{
+		if (app.dragging || app.redoStack.empty()) return;
+		MoveHistoryEntry h = app.redoStack.back();
+		app.redoStack.pop_back();
+		applySnapshot(app, h.pieceIndex, h.after);
+		app.undoStack.push_back(h);
 	}
 
 	struct PieceHit {
@@ -726,7 +844,7 @@ namespace {
 			glPopMatrix();
 		}
 		glColor3f(0.68f, 0.68f, 0.68f);
-		drawPieceOuterOutline(centers, R);
+		drawPieceOuterOutline(centers, R, 0.075f);
 	}
 
 	static void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
@@ -766,13 +884,13 @@ namespace {
 			glPopMatrix();
 		}
 
-		if (selected) glColor3f(1.0f, 1.0f, 1.0f);
-		else          glColor3f(p.def->r, p.def->g, p.def->b);
-		drawPieceOuterOutline(centers, R);
+		if (selected)      glColor3f(1.0f, 1.0f, 1.0f);
+		else if (p.placed) glColor3f(0.10f, 0.10f, 0.05f);
+		else               glColor3f(p.def->r, p.def->g, p.def->b);
+		drawPieceOuterOutline(centers, R, dragging ? 0.125f : 0.095f);
 
 		// Keep the original preview style: no extra visible handle and no black
-		// letter printed inside the piece.  The upper-left hex centre is still the
-		// invisible drag handle.
+		// letter printed inside the piece.  Any hex can be used for dragging.
 		if (!p.placed || dragging) {
 			float minCY = 1e9f, maxCY = -1e9f;
 			for (const auto& c : centers) {
@@ -808,11 +926,6 @@ namespace {
 		glColor3f(1.0f, 0.75f + 0.25f * pulse, 0.15f);
 		glText("SUCCESS!");
 		glPopMatrix();
-		glPushMatrix();
-		glTranslatef(-3.4f, 4.45f, 0.20f);
-		glColor3f(1.0f, 1.0f, 1.0f);
-		glText("Date is visible");
-		glPopMatrix();
 	}
 
 	static void drawHelpTooltip(bool showHelp)
@@ -832,22 +945,26 @@ namespace {
 		glBegin(GL_QUADS);
 		glVertex3f(0.0f, 0.15f, 0.0f);
 		glVertex3f(8.2f, 0.15f, 0.0f);
-		glVertex3f(8.2f, -1.72f, 0.0f);
-		glVertex3f(0.0f, -1.72f, 0.0f);
+		glVertex3f(8.2f, -2.05f, 0.0f);
+		glVertex3f(0.0f, -2.05f, 0.0f);
 		glEnd();
 		glColor3f(1.0f, 1.0f, 1.0f);
 		glTranslatef(0.15f, -0.15f, 0.02f);
-		glText("Drag upper-left hex to move");
+		glText("Drag any hex to move");
 		glTranslatef(0.0f, -0.30f, 0.0f);
-		glText("Click other hex: rotate + drag");
+		glText("R/Space: rotate CW held piece");
 		glTranslatef(0.0f, -0.30f, 0.0f);
-		glText("R/Space: rotate held piece");
+		glText("L: rotate CCW held piece");
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("M: mirror held piece");
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("Green=place, Red=blocked");
 		glTranslatef(0.0f, -0.30f, 0.0f);
-		glText("Esc: cancel, H/F1: hide help");
+		glText("Drop outside: return home");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("Esc: cancel, Ctrl+Z/Y: undo/redo");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("H/F1: hide help");
 		glPopMatrix();
 	}
 
@@ -876,24 +993,18 @@ namespace {
 
 			gApp->selectedPiece = pieceIndex;
 			PieceState& p = gApp->pieces[pieceIndex];
-			bool grabbedHandle = (hit.localIndex == 0);
-
+			gApp->beforeDragSnapshot = makeSnapshot(p);
 			gApp->savedPlaced = p.placed;
 			gApp->savedX = p.x;
 			gApp->savedY = p.y;
 			gApp->savedOffsets = p.offsets;
 			gApp->savedCells = p.occupiedCells;
-			gApp->ghostCenters = pieceCenters(p);
+			gApp->savedGhostCenters = p.ghostCenters;
+			// Keep the grey silhouette fixed at the original home position.
 			gApp->dragLocal = p.offsets[hit.localIndex];
 
 			if (p.placed) {
 				clearPieceOccupancy(*gApp, pieceIndex);
-			}
-
-			if (!grabbedHandle) {
-				// Rotate around the hex that was actually grabbed.  That hex stays
-				// visually in place; the rest of the piece swings around it.
-				gApp->dragLocal = applyPieceTransform(p, PieceTransform::RotateCW, gApp->dragLocal, true);
 			}
 
 			gApp->dragDx = p.x - w.first;
@@ -907,12 +1018,31 @@ namespace {
 			int pieceIndex = gApp->dragPiece;
 			updateDragTarget(*gApp);
 			bool ok = placePiece(*gApp, pieceIndex, gApp->target);
-			if (!ok) {
+			if (ok) {
+				MoveHistoryEntry h;
+				h.pieceIndex = pieceIndex;
+				h.before = gApp->beforeDragSnapshot;
+				h.after = makeSnapshot(gApp->pieces[pieceIndex]);
+				gApp->undoStack.push_back(h);
+				gApp->redoStack.clear();
+			} else if (gApp->target.outsideBoard) {
+				// Dropping outside the board sends the piece back to its original
+				// starting position outside the board, not to the previous attempt.
+				restorePieceToHome(*gApp, pieceIndex);
+				MoveHistoryEntry h;
+				h.pieceIndex = pieceIndex;
+				h.before = gApp->beforeDragSnapshot;
+				h.after = makeSnapshot(gApp->pieces[pieceIndex]);
+				if (!snapshotsEqual(h.before, h.after)) {
+					gApp->undoStack.push_back(h);
+					gApp->redoStack.clear();
+				}
+			} else {
+				// Blocked board position: cancel this try and return to the drag-start state.
 				restoreDraggedPiece(*gApp, pieceIndex);
 			}
 			gApp->dragging = false;
 			gApp->dragPiece = -1;
-			gApp->ghostCenters.clear();
 			gApp->target = PlacementCandidate{};
 			gApp->solved = checkSolved(*gApp);
 		}
@@ -938,15 +1068,28 @@ namespace {
 		}
 	}
 
-	static void keyCallback(GLFWwindow* window, int key, int, int action, int)
+	static void keyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	{
 		if (gApp == nullptr || action != GLFW_PRESS) return;
+		const bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
+		if (ctrl && key == GLFW_KEY_Z) {
+			undoLastMove(*gApp);
+			return;
+		}
+		if (ctrl && key == GLFW_KEY_Y) {
+			redoLastMove(*gApp);
+			return;
+		}
 		if (key == GLFW_KEY_H || key == GLFW_KEY_F1) {
 			gApp->showHelp = !gApp->showHelp;
 			return;
 		}
 		if (key == GLFW_KEY_R || key == GLFW_KEY_SPACE) {
 			transformSelectedPiece(window, PieceTransform::RotateCW);
+			return;
+		}
+		if (key == GLFW_KEY_L) {
+			transformSelectedPiece(window, PieceTransform::RotateCCW);
 			return;
 		}
 		if (key == GLFW_KEY_M) {
@@ -957,7 +1100,6 @@ namespace {
 			restoreDraggedPiece(*gApp, gApp->dragPiece);
 			gApp->dragging = false;
 			gApp->dragPiece = -1;
-			gApp->ghostCenters.clear();
 			gApp->target = PlacementCandidate{};
 		}
 	}
@@ -1049,6 +1191,10 @@ int main()
 		auto home = pieceHomeAnchor(def.label);
 		ps.x = home.first;
 		ps.y = home.second;
+		ps.homeX = home.first;
+		ps.homeY = home.second;
+		ps.homeOffsets = ps.offsets;
+		ps.ghostCenters = pieceCenters(ps); // permanent original silhouette
 		app.pieces.push_back(ps);
 	}
 	gApp = &app;
@@ -1078,8 +1224,10 @@ int main()
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
 		}
-		if (!app.ghostCenters.empty()) {
-			drawGhostFootprint(app.ghostCenters);
+		for (const auto& piece : app.pieces) {
+			if (!piece.ghostCenters.empty()) {
+				drawGhostFootprint(piece.ghostCenters);
+			}
 		}
 		if (app.dragging && !app.target.cells.empty()) {
 			if (app.target.valid) {

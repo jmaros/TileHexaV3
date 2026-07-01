@@ -255,45 +255,42 @@ namespace {
 			}
 		}
 
-		std::unordered_map<QPoint, std::vector<QPoint>, QPointHash> adjacency;
-		for (const auto& kv : edgeUseCount) {
-			if (kv.second == 1) {
-				adjacency[kv.first.a].push_back(kv.first.b);
-				adjacency[kv.first.b].push_back(kv.first.a);
-			}
-		}
-		if (adjacency.empty()) return;
-
-		QPoint start = adjacency.begin()->first;
-		for (const auto& kv : adjacency) {
-			const QPoint& p = kv.first;
-			if (p.y < start.y || (p.y == start.y && p.x < start.x)) start = p;
-		}
-
-		std::vector<QPoint> loop;
-		loop.reserve(adjacency.size() + 1);
-		QPoint prev{ 0x7fffffff, 0x7fffffff };
-		QPoint cur = start;
-
-		for (size_t guard = 0; guard < adjacency.size() + 8; ++guard) {
-			loop.push_back(cur);
-			const auto& nbr = adjacency[cur];
-			//if (nbr.empty()) break;
-			QPoint next = nbr[0];
-			if (nbr.size() > 1 && next == prev) next = nbr[1];
-			prev = cur;
-			cur = next;
-			if (cur == start) {
-				loop.push_back(start);
-				break;
-			}
-		}
+		// Draw the exterior edges as filled quad strips, not GL_LINES.
+		// This is more stable for the grey home ghost and avoids line-rasterizer
+		// artefacts at concave/polyhex vertices.  The end points are extended a
+		// little so neighbouring outline strips overlap cleanly at corners.
+		if (edgeUseCount.empty()) return;
 
 		constexpr float Q = 10000.0f;
-		glLineWidth(1.8f);
-		glBegin(GL_LINE_STRIP);
-		for (const auto& p : loop) {
-			glVertex3f(p.x / Q, p.y / Q, z);
+		const float halfWidth = radius * 0.045f;
+		glBegin(GL_QUADS);
+		for (const auto& kv : edgeUseCount) {
+			if (kv.second == 1) {
+				float ax = kv.first.a.x / Q;
+				float ay = kv.first.a.y / Q;
+				float bx = kv.first.b.x / Q;
+				float by = kv.first.b.y / Q;
+
+				float dx = bx - ax;
+				float dy = by - ay;
+				float len = sqrtf(dx * dx + dy * dy);
+				if (len <= 0.000001f) continue;
+
+				float ux = dx / len;
+				float uy = dy / len;
+				float nx = -uy * halfWidth;
+				float ny = ux * halfWidth;
+
+				ax -= ux * halfWidth;
+				ay -= uy * halfWidth;
+				bx += ux * halfWidth;
+				by += uy * halfWidth;
+
+				glVertex3f(ax + nx, ay + ny, z);
+				glVertex3f(bx + nx, by + ny, z);
+				glVertex3f(bx - nx, by - ny, z);
+				glVertex3f(ax - nx, ay - ny, z);
+			}
 		}
 		glEnd();
 	}
@@ -829,13 +826,39 @@ namespace {
 		return {};
 	}
 
+	static bool shouldDrawHomeGhost(const PieceState& p)
+	{
+		// Do not draw the permanent home silhouette while the piece itself is
+		// still exactly at home.  Drawing the grey ghost and the yellow piece on
+		// top of each other caused the apparent B/C outline instability.
+		return fabsf(p.x - p.homeX) > 0.001f || fabsf(p.y - p.homeY) > 0.001f;
+	}
+
 	static void drawGhostFootprint(const std::vector<std::pair<float, float>>& centers)
 	{
 		if (centers.empty()) return;
-		const float fillR = drawR * 1.015f;
+
+		// Draw the grey home ghost as two filled polygon layers.  First draw a
+		// slightly larger light-grey silhouette, then draw the darker body on top.
+		// This avoids all line/edge reconstruction for ghosts, so there are no
+		// unstable internal strokes at concave joins or shared hex edges.
+		const float outlineR = drawR * 1.085f;
+		const float fillR = drawR * 1.018f;
+
 		for (const auto& c : centers) {
 			glPushMatrix();
-			glTranslatef(c.first, c.second, 0.035f);
+			glTranslatef(c.first, c.second, 0.010f);
+			glEnable(GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset(1.0f, 1.0f);
+			glColor3f(0.68f, 0.68f, 0.68f);
+			CreateHexVertices(GL_POLYGON, outlineR);
+			glDisable(GL_POLYGON_OFFSET_FILL);
+			glPopMatrix();
+		}
+
+		for (const auto& c : centers) {
+			glPushMatrix();
+			glTranslatef(c.first, c.second, 0.014f);
 			glEnable(GL_POLYGON_OFFSET_FILL);
 			glPolygonOffset(1.0f, 1.0f);
 			glColor3f(0.38f, 0.38f, 0.38f);
@@ -843,8 +866,6 @@ namespace {
 			glDisable(GL_POLYGON_OFFSET_FILL);
 			glPopMatrix();
 		}
-		glColor3f(0.68f, 0.68f, 0.68f);
-		drawPieceOuterOutline(centers, R, 0.075f);
 	}
 
 	static void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
@@ -1225,7 +1246,7 @@ int main()
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
 		}
 		for (const auto& piece : app.pieces) {
-			if (!piece.ghostCenters.empty()) {
+			if (!piece.ghostCenters.empty() && shouldDrawHomeGhost(piece)) {
 				drawGhostFootprint(piece.ghostCenters);
 			}
 		}
@@ -1250,4 +1271,4 @@ int main()
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	return 0;
-}
+	}

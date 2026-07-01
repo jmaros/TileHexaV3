@@ -11,6 +11,8 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <algorithm>
+#include <string>
 
 constexpr float PI = 3.14159265358979323846f;
 
@@ -27,6 +29,8 @@ const float baseR = R * 8.5f;     // The total radius of the whole board (from c
 const float drawR = R * 0.99f;    // 1% gap
 const float sx = sqrtf(3.0f) * R;
 const float sy = 1.5f * R;
+constexpr int WINDOW_W = 800;
+constexpr int WINDOW_H = 600;
 
 // Cell descriptor -------------------------------------------------------
 struct Cell { int type, value; };
@@ -76,8 +80,10 @@ const std::vector<std::vector<Cell>> grid = {
 //  Row 4 (9): - Jan  7    8    9   10   11   12   13  Dec
 
 struct HexTile {
+	int row, col;
 	float x, y, z;
 	bool highlight;
+	bool protectedDate;  // the current month / weekday / day cells must stay visible
 	Cell content;
 };
 
@@ -91,33 +97,39 @@ struct PieceDefinition {
 };
 
 const std::vector<PieceDefinition> PieceDefinitions = {
-	{ 'A', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{3.0f*sx,0.0f},{4.0f*sx,0.0f}}, 1.0f,1.0f,0.3f },
-	{ 'B', {{0.0f,0.0f},{1.0f*sx,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'C', {{-1.0f*sx,0.0f},{0.0f,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'D', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{3.0f*sx,0.0f},{3.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'E', {{-1.5f*sx,0.0f},{-0.5f*sx,0.0f},{0.5f*sx,0.0f},{0.0f*sx,-1.0f*sy},{1.0f*sx,-1.0f*sy},{2.0f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'F', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'G', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{3.0f*sx,0.0f},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'H', {{0.0f,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{2.5f*sx,-1.0f*sy},{3.0f*sx,-2.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'I', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{2.5f*sx,-1.0f*sy},{3.0f*sx,-2.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'J', {{0.5f*sx,0.0f},{1.5f*sx,0.0f},{1.0f*sx,-1.0f*sy},{0.5f*sx,-2.0f*sy},{1.5f*sx,-2.0f*sy}}, 1.0f,1.0f,0.3f },
-	{ 'K', {{0.0f,0.0f},{1.0f*sx,0.0f},{2.0f*sx,0.0f},{0.5f*sx,-1.0f*sy},{1.5f*sx,-1.0f*sy},{1.0f*sx,-2.0f*sy}}, 1.0f,1.0f,0.3f },
+	{ 'A', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{3.0f * sx,0.0f},{4.0f * sx,0.0f}}, 1.0f,1.0f,0.3f },
+	{ 'B', {{0.0f,0.0f},{1.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'C', {{-1.0f * sx,0.0f},{0.0f,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'D', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{3.0f * sx,0.0f},{3.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'E', {{-1.5f * sx,0.0f},{-0.5f * sx,0.0f},{0.5f * sx,0.0f},{0.0f * sx,-1.0f * sy},{1.0f * sx,-1.0f * sy},{2.0f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'F', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
+	// G is a 5-hex piece: top row 2, second row 2, bottom row 1.
+	{ 'G', {{0.0f,0.0f},{1.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{1.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'H', {{0.0f,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy},{3.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'I', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{2.5f * sx,-1.0f * sy},{3.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'J', {{0.5f * sx,0.0f},{1.5f * sx,0.0f},{1.0f * sx,-1.0f * sy},{0.5f * sx,-2.0f * sy},{1.5f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
+	{ 'K', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{1.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
 };
 
 void setPerspective(float fovy, float aspect, float zNear, float zFar)
 {
-    float fH = tan(fovy / 360.0f * PI) * zNear;
-    float fW = fH * aspect;
-    glFrustum(-fW, fW, -fH, fH, zNear, zFar);
+	float fH = tan(fovy / 360.0f * PI) * zNear;
+	float fW = fH * aspect;
+	glFrustum(-fW, fW, -fH, fH, zNear, zFar);
+}
+
+void glText(const char* text)
+{
+	if (FONT_BASE == 0 || text == nullptr) return;
+	glRasterPos3f(0.0f, 0.0f, 0.01f);
+	int len = (int)strlen(text);
+	glListBase(FONT_BASE - 32);
+	glCallLists(len, GL_UNSIGNED_BYTE, text);
 }
 
 void glText(const std::array<char, 4>& text)
 {
-    if (FONT_BASE == 0) return;
-    glRasterPos3f(0.0f, 0.0f, 0.01f);
-    int len = (int)strlen(text.data());
-    glListBase(FONT_BASE - 32);
-    glCallLists(len, GL_UNSIGNED_BYTE, text.data());
+	glText(text.data());
 }
 
 namespace {
@@ -188,266 +200,758 @@ namespace {
 	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius);
 
 	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius)
-{
-    struct QPoint {
-        int x;
-        int y;
-        bool operator==(const QPoint& o) const noexcept { return x == o.x && y == o.y; }
-    };
-    struct QPointHash {
-        size_t operator()(const QPoint& p) const noexcept {
-            return (static_cast<size_t>(static_cast<unsigned int>(p.x)) << 1) ^
-                   static_cast<size_t>(static_cast<unsigned int>(p.y));
-        }
-    };
-    struct EdgeKey {
-        QPoint a;
-        QPoint b;
-        bool operator==(const EdgeKey& o) const noexcept { return a == o.a && b == o.b; }
-    };
-    struct EdgeKeyHash {
-        size_t operator()(const EdgeKey& e) const noexcept {
-            return QPointHash{}(e.a) * 1315423911u ^ QPointHash{}(e.b);
-        }
-    };
+	{
+		struct QPoint {
+			int x;
+			int y;
+			bool operator==(const QPoint& o) const noexcept { return x == o.x && y == o.y; }
+		};
+		struct QPointHash {
+			size_t operator()(const QPoint& p) const noexcept
+			{
+				return (static_cast<size_t>(static_cast<unsigned int>(p.x)) << 1) ^
+					static_cast<size_t>(static_cast<unsigned int>(p.y));
+			}
+		};
+		struct EdgeKey {
+			QPoint a;
+			QPoint b;
+			bool operator==(const EdgeKey& o) const noexcept { return a == o.a && b == o.b; }
+		};
+		struct EdgeKeyHash {
+			size_t operator()(const EdgeKey& e) const noexcept
+			{
+				return QPointHash{}(e.a) * 1315423911u ^ QPointHash{}(e.b);
+			}
+		};
 
-    auto quantizePoint = [](float x, float y) -> QPoint {
-        constexpr float Q = 10000.0f;
-        return { static_cast<int>(lroundf(x * Q)), static_cast<int>(lroundf(y * Q)) };
-    };
-    auto makeEdgeKey = [](QPoint p1, QPoint p2) -> EdgeKey {
-        if (p2.y < p1.y || (p2.y == p1.y && p2.x < p1.x)) {
-            QPoint t = p1; p1 = p2; p2 = t;
-        }
-        return { p1, p2 };
-    };
+		auto quantizePoint = [](float x, float y) -> QPoint
+			{
+				constexpr float Q = 10000.0f;
+				return { static_cast<int>(lroundf(x * Q)), static_cast<int>(lroundf(y * Q)) };
+			};
+		auto makeEdgeKey = [](QPoint p1, QPoint p2) -> EdgeKey
+			{
+				if (p2.y < p1.y || (p2.y == p1.y && p2.x < p1.x)) {
+					QPoint t = p1; p1 = p2; p2 = t;
+				}
+				return { p1, p2 };
+			};
 
-    std::unordered_map<EdgeKey, int, EdgeKeyHash> edgeUseCount;
+		std::unordered_map<EdgeKey, int, EdgeKeyHash> edgeUseCount;
 
-    for (const auto& c : centers) {
-        for (int i = 0; i < 6; ++i) {
-            float a1 = PI / 3.0f * (i + 0.5f);
-            float a2 = PI / 3.0f * ((i + 1) % 6 + 0.5f);
-            QPoint p1 = quantizePoint(c.first + radius * cosf(a1), c.second + radius * sinf(a1));
-            QPoint p2 = quantizePoint(c.first + radius * cosf(a2), c.second + radius * sinf(a2));
-            edgeUseCount[makeEdgeKey(p1, p2)]++;
-        }
-    }
+		for (const auto& c : centers) {
+			for (int i = 0; i < 6; ++i) {
+				float a1 = PI / 3.0f * (i + 0.5f);
+				float a2 = PI / 3.0f * ((i + 1) % 6 + 0.5f);
+				QPoint p1 = quantizePoint(c.first + radius * cosf(a1), c.second + radius * sinf(a1));
+				QPoint p2 = quantizePoint(c.first + radius * cosf(a2), c.second + radius * sinf(a2));
+				edgeUseCount[makeEdgeKey(p1, p2)]++;
+			}
+		}
 
-    std::unordered_map<QPoint, std::vector<QPoint>, QPointHash> adjacency;
-    for (const auto& kv : edgeUseCount) {
-        if (kv.second == 1) {
-            adjacency[kv.first.a].push_back(kv.first.b);
-            adjacency[kv.first.b].push_back(kv.first.a);
-        }
-    }
-    if (adjacency.empty()) return;
+		std::unordered_map<QPoint, std::vector<QPoint>, QPointHash> adjacency;
+		for (const auto& kv : edgeUseCount) {
+			if (kv.second == 1) {
+				adjacency[kv.first.a].push_back(kv.first.b);
+				adjacency[kv.first.b].push_back(kv.first.a);
+			}
+		}
+		if (adjacency.empty()) return;
 
-    QPoint start = adjacency.begin()->first;
-    for (const auto& kv : adjacency) {
-        const QPoint& p = kv.first;
-        if (p.y < start.y || (p.y == start.y && p.x < start.x)) start = p;
-    }
+		QPoint start = adjacency.begin()->first;
+		for (const auto& kv : adjacency) {
+			const QPoint& p = kv.first;
+			if (p.y < start.y || (p.y == start.y && p.x < start.x)) start = p;
+		}
 
-    std::vector<QPoint> loop;
-    loop.reserve(adjacency.size() + 1);
-    QPoint prev{ 0x7fffffff, 0x7fffffff };
-    QPoint cur = start;
+		std::vector<QPoint> loop;
+		loop.reserve(adjacency.size() + 1);
+		QPoint prev{ 0x7fffffff, 0x7fffffff };
+		QPoint cur = start;
 
-    for (size_t guard = 0; guard < adjacency.size() + 8; ++guard) {
-        loop.push_back(cur);
-        const auto& nbr = adjacency[cur];
-        //if (nbr.empty()) break;
-        QPoint next = nbr[0];
-        if (nbr.size() > 1 && next == prev) next = nbr[1];
-        prev = cur;
-        cur = next;
-        if (cur == start) {
-            loop.push_back(start);
-            break;
-        }
-    }
+		for (size_t guard = 0; guard < adjacency.size() + 8; ++guard) {
+			loop.push_back(cur);
+			const auto& nbr = adjacency[cur];
+			//if (nbr.empty()) break;
+			QPoint next = nbr[0];
+			if (nbr.size() > 1 && next == prev) next = nbr[1];
+			prev = cur;
+			cur = next;
+			if (cur == start) {
+				loop.push_back(start);
+				break;
+			}
+		}
 
-    constexpr float Q = 10000.0f;
-    glLineWidth(1.4f);
-    glBegin(GL_LINE_STRIP);
-    for (const auto& p : loop) {
-        glVertex3f(p.x / Q, p.y / Q, 0.0f);
-    }
-    glEnd();
-}
+		constexpr float Q = 10000.0f;
+		glLineWidth(1.4f);
+		glBegin(GL_LINE_STRIP);
+		for (const auto& p : loop) {
+			glVertex3f(p.x / Q, p.y / Q, 0.0f);
+		}
+		glEnd();
+	}
 
 	void drawPiecePreviews(const std::vector<PieceDefinition>& pieces)
 	{
-    const float pR = drawR;
-    const float fillR = pR * 1.015f; // tiny overlap to hide internal raster seams
+		const float pR = drawR;
+		const float fillR = pR * 1.015f; // tiny overlap to hide internal raster seams
 
-    auto pieceAnchor = [](char label) -> std::pair<float, float> {
-        switch (label) {
-            // left side: A..E top -> down
-            case 'A': return { -9.6f,  5.6f };
-            case 'B': return { -9.6f,  2.9f };
-            case 'C': return { -9.6f,  0.0f };
-            case 'D': return { -9.6f, -3.5f };
-            case 'E': return { -9.6f, -5.7f };
+		auto pieceAnchor = [](char label) -> std::pair<float, float>
+			{
+				switch (label) {
+					// left side: A..E top -> down
+					case 'A': return { -9.6f,  5.6f };
+					case 'B': return { -9.6f,  2.9f };
+					case 'C': return { -9.6f,  0.0f };
+					case 'D': return { -9.6f, -3.5f };
+					case 'E': return { -9.6f, -5.7f };
 
-            // bottom middle: F
-            case 'F': return { -0.2f, -5.5f };
+					// bottom middle: F
+					case 'F': return { -0.2f, -5.5f };
 
-            // right side: G..K bottom -> up
-            case 'G': return {  6.1f, -6.0f };
-            case 'H': return {  6.1f, -2.6f };
-            case 'I': return {  6.1f, -0.2f };
-            case 'J': return {  6.1f,  3.2f };
-            case 'K': return {  6.1f,  6.2f };
-            default:  return {  6.0f,  0.0f };
-        }
-    };
+					// right side: G..K bottom -> up
+					case 'G': return {  6.1f, -6.0f };
+					case 'H': return {  6.1f, -2.6f };
+					case 'I': return {  6.1f, -0.2f };
+					case 'J': return {  6.1f,  3.2f };
+					case 'K': return {  6.1f,  6.2f };
+					default:  return {  6.0f,  0.0f };
+				}
+			};
 
-    for (const auto& p : pieces) {
-        float tlX = p.offsets[0].first, tlY = p.offsets[0].second;
-        for (const auto& rc : p.offsets) {
-            if (rc.second > tlY || (rc.second == tlY && rc.first < tlX)) {
-                tlX = rc.first; tlY = rc.second;
-            }
-        }
+		for (const auto& p : pieces) {
+			float tlX = p.offsets[0].first, tlY = p.offsets[0].second;
+			for (const auto& rc : p.offsets) {
+				if (rc.second > tlY || (rc.second == tlY && rc.first < tlX)) {
+					tlX = rc.first; tlY = rc.second;
+				}
+			}
 
-        auto anc = pieceAnchor(p.label);
-        const float ox = anc.first;
-        const float oy = anc.second;
+			auto anc = pieceAnchor(p.label);
+			const float ox = anc.first;
+			const float oy = anc.second;
 
-        std::vector<std::pair<float, float>> pieceCenters;
-        pieceCenters.reserve(p.offsets.size());
+			std::vector<std::pair<float, float>> pieceCenters;
+			pieceCenters.reserve(p.offsets.size());
 
-        float minCY = 1e9f, maxCY = -1e9f;
+			float minCY = 1e9f, maxCY = -1e9f;
 
-        for (const auto& rc : p.offsets) {
-            float px = rc.first  - tlX + ox;
-            float py = rc.second - tlY + oy;
-            pieceCenters.push_back({ px, py });
-            minCY = fminf(minCY, py);
-            maxCY = fmaxf(maxCY, py);
+			for (const auto& rc : p.offsets) {
+				float px = rc.first - tlX + ox;
+				float py = rc.second - tlY + oy;
+				pieceCenters.push_back({ px, py });
+				minCY = fminf(minCY, py);
+				maxCY = fmaxf(maxCY, py);
 
-            glPushMatrix();
-            glTranslatef(px, py, 0.0f);
+				glPushMatrix();
+				glTranslatef(px, py, 0.0f);
 
-            glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.0f, 1.0f);
-            glColor3f(p.r * 0.7f, p.g * 0.7f, p.b * 0.7f);
-            CreateHexVertices(GL_POLYGON, fillR);
-            glDisable(GL_POLYGON_OFFSET_FILL);
+				glEnable(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset(1.0f, 1.0f);
+				glColor3f(p.r * 0.7f, p.g * 0.7f, p.b * 0.7f);
+				CreateHexVertices(GL_POLYGON, fillR);
+				glDisable(GL_POLYGON_OFFSET_FILL);
 
-            glPopMatrix();
-        }
+				glPopMatrix();
+			}
 
-        glColor3f(p.r, p.g, p.b);
-        drawPieceOuterOutline(pieceCenters, R);
+			glColor3f(p.r, p.g, p.b);
+			drawPieceOuterOutline(pieceCenters, R);
 
-        std::array<char, 4> lbl{};
-        lbl[0] = p.label;
-        glPushMatrix();
-        glTranslatef(ox - 0.9f, (minCY + maxCY) * 0.5f, 0.0f);
-        glColor3f(1.0f, 1.0f, 1.0f);
-        glText(lbl);
-        glPopMatrix();
-    }
+			std::array<char, 4> lbl{};
+			lbl[0] = p.label;
+			glPushMatrix();
+			glTranslatef(ox - 0.9f, (minCY + maxCY) * 0.5f, 0.0f);
+			glColor3f(1.0f, 1.0f, 1.0f);
+			glText(lbl);
+			glPopMatrix();
+		}
 	}
+
+
+	struct PlacementCandidate {
+		bool valid = false;
+		std::vector<int> cells;
+		float snapX = 0.0f;
+		float snapY = 0.0f;
+	};
+
+	struct PieceState {
+		const PieceDefinition* def = nullptr;
+		// Local hex-centre offsets in world units.  The first/top-left cell is
+		// the invisible drag handle, but we do not draw an extra marker for it.
+		std::vector<std::pair<float, float>> offsets;
+		float x = 0.0f;                   // world position of the upper-left handle cell
+		float y = 0.0f;
+		bool placed = false;
+		std::vector<int> occupiedCells;
+	};
+
+	struct AppState {
+		std::vector<HexTile>* tiles = nullptr;
+		std::vector<PieceState> pieces;
+		std::vector<int> occupancy;        // board cell -> piece index, -1 means free
+		int selectedPiece = -1;
+		int dragPiece = -1;
+		bool dragging = false;
+		float dragDx = 0.0f;
+		float dragDy = 0.0f;
+		bool savedPlaced = false;
+		float savedX = 0.0f;
+		float savedY = 0.0f;
+		std::vector<std::pair<float, float>> savedOffsets;
+		std::vector<int> savedCells;
+		std::vector<int> ghostCells;        // grey frozen footprint while a placed piece is lifted
+		PlacementCandidate target;
+		bool solved = false;
+		int protectedCellCount = 0;
+	};
+
+	static AppState* gApp = nullptr;
+
+	static std::pair<float, float> pieceHomeAnchor(char label)
+	{
+		switch (label) {
+			case 'A': return { -9.6f,  5.6f };
+			case 'B': return { -9.6f,  2.9f };
+			case 'C': return { -9.6f,  0.0f };
+			case 'D': return { -9.6f, -3.5f };
+			case 'E': return { -9.6f, -5.7f };
+			case 'F': return { -0.2f, -5.5f };
+			case 'G': return { 6.1f, -6.0f };
+			case 'H': return { 6.1f, -2.6f };
+			case 'I': return { 6.1f, -0.2f };
+			case 'J': return { 6.1f,  3.2f };
+			case 'K': return { 6.1f,  6.2f };
+			default:  return { 6.0f,  0.0f };
+		}
+	}
+
+	static bool topLeftLess(const std::pair<float, float>& a, const std::pair<float, float>& b)
+	{
+		if (fabsf(a.second - b.second) > 0.001f) return a.second > b.second;
+		return a.first < b.first;
+	}
+
+	static void cleanTiny(float& v)
+	{
+		if (fabsf(v) < 0.00001f) v = 0.0f;
+	}
+
+	static void normalizeToUpperLeft(std::vector<std::pair<float, float>>& offsets)
+	{
+		if (offsets.empty()) return;
+		auto anchor = offsets[0];
+		for (const auto& c : offsets) {
+			if (topLeftLess(c, anchor)) anchor = c;
+		}
+		for (auto& c : offsets) {
+			c.first -= anchor.first;
+			c.second -= anchor.second;
+			cleanTiny(c.first);
+			cleanTiny(c.second);
+		}
+		std::sort(offsets.begin(), offsets.end(), [](const auto& a, const auto& b)
+				  {
+					  return topLeftLess(a, b);
+				  });
+	}
+
+	static std::vector<std::pair<float, float>> makeLocalOffsets(const PieceDefinition& p)
+	{
+		auto result = p.offsets;
+		normalizeToUpperLeft(result);
+		return result;
+	}
+
+	static void rotatePieceClockwise(PieceState& p)
+	{
+		// Pure geometric 60-degree rotation.  This preserves the original preview
+		// shapes much better than converting through a rounded axial coordinate.
+		const float cs = 0.5f;
+		const float sn = -0.86602540378443864676f; // sin(-60 deg)
+		for (auto& c : p.offsets) {
+			float x = c.first;
+			float y = c.second;
+			c.first = cs * x - sn * y;
+			c.second = sn * x + cs * y;
+			cleanTiny(c.first);
+			cleanTiny(c.second);
+		}
+		normalizeToUpperLeft(p.offsets);
+	}
+
+	static std::vector<std::pair<float, float>> pieceCenters(const PieceState& p)
+	{
+		std::vector<std::pair<float, float>> centers;
+		centers.reserve(p.offsets.size());
+		for (const auto& c : p.offsets) {
+			centers.push_back({ p.x + c.first, p.y + c.second });
+		}
+		return centers;
+	}
+
+	static std::pair<float, float> screenToWorld(double sxPos, double syPos)
+	{
+		const float nx = static_cast<float>(2.0 * sxPos / WINDOW_W - 1.0);
+		const float ny = static_cast<float>(1.0 - 2.0 * syPos / WINDOW_H);
+		const float halfH = 20.0f * tanf(45.0f * PI / 360.0f);
+		const float halfW = halfH * (static_cast<float>(WINDOW_W) / static_cast<float>(WINDOW_H));
+		return { nx * halfW, ny * halfH };
+	}
+
+	static int nearestCell(const std::vector<HexTile>& tiles, float x, float y, float maxDist)
+	{
+		int best = -1;
+		float bestD2 = maxDist * maxDist;
+		for (int i = 0; i < static_cast<int>(tiles.size()); ++i) {
+			float dx = tiles[i].x - x;
+			float dy = tiles[i].y - y;
+			float d2 = dx * dx + dy * dy;
+			if (d2 <= bestD2) {
+				bestD2 = d2;
+				best = i;
+			}
+		}
+		return best;
+	}
+
+	static void clearPieceOccupancy(AppState& app, int pieceIndex)
+	{
+		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
+		for (int c : app.pieces[pieceIndex].occupiedCells) {
+			if (c >= 0 && c < static_cast<int>(app.occupancy.size()) && app.occupancy[c] == pieceIndex) {
+				app.occupancy[c] = -1;
+			}
+		}
+		app.pieces[pieceIndex].occupiedCells.clear();
+		app.pieces[pieceIndex].placed = false;
+	}
+
+	static PlacementCandidate computePlacementCandidate(const AppState& app, const PieceState& p)
+	{
+		PlacementCandidate result;
+		if (app.tiles == nullptr) return result;
+		const auto& tiles = *app.tiles;
+
+		int anchorCell = nearestCell(tiles, p.x, p.y, R * 0.90f);
+		if (anchorCell < 0) return result;
+
+		result.snapX = tiles[anchorCell].x;
+		result.snapY = tiles[anchorCell].y;
+		result.cells.reserve(p.offsets.size());
+
+		for (const auto& w : p.offsets) {
+			float cx = result.snapX + w.first;
+			float cy = result.snapY + w.second;
+			int ci = nearestCell(tiles, cx, cy, R * 0.25f);
+			if (ci < 0) {
+				result.valid = false;
+				return result;
+			}
+			if (std::find(result.cells.begin(), result.cells.end(), ci) != result.cells.end()) {
+				result.valid = false;
+				return result;
+			}
+			if (tiles[ci].protectedDate) {
+				result.cells.push_back(ci);
+				result.valid = false;
+				return result;
+			}
+			if (ci < static_cast<int>(app.occupancy.size()) && app.occupancy[ci] != -1) {
+				result.cells.push_back(ci);
+				result.valid = false;
+				return result;
+			}
+			result.cells.push_back(ci);
+		}
+		result.valid = true;
+		return result;
+	}
+
+	static void updateDragTarget(AppState& app)
+	{
+		app.target = PlacementCandidate{};
+		if (!app.dragging || app.dragPiece < 0) return;
+		app.target = computePlacementCandidate(app, app.pieces[app.dragPiece]);
+	}
+
+	static bool placePiece(AppState& app, int pieceIndex, const PlacementCandidate& placement)
+	{
+		if (!placement.valid) return false;
+		PieceState& p = app.pieces[pieceIndex];
+		p.x = placement.snapX;
+		p.y = placement.snapY;
+		p.occupiedCells = placement.cells;
+		p.placed = true;
+		for (int c : p.occupiedCells) {
+			if (c >= 0 && c < static_cast<int>(app.occupancy.size())) {
+				app.occupancy[c] = pieceIndex;
+			}
+		}
+		return true;
+	}
+
+	static void restoreDraggedPiece(AppState& app, int pieceIndex)
+	{
+		PieceState& p = app.pieces[pieceIndex];
+		p.x = app.savedX;
+		p.y = app.savedY;
+		p.offsets = app.savedOffsets;
+		p.placed = app.savedPlaced;
+		p.occupiedCells = app.savedCells;
+		if (p.placed) {
+			for (int c : p.occupiedCells) {
+				if (c >= 0 && c < static_cast<int>(app.occupancy.size())) {
+					app.occupancy[c] = pieceIndex;
+				}
+			}
+		}
+	}
+
+	static bool checkSolved(const AppState& app)
+	{
+		if (app.tiles == nullptr) return false;
+		for (const auto& p : app.pieces) {
+			if (!p.placed) return false;
+		}
+		int freeCells = 0;
+		for (int i = 0; i < static_cast<int>(app.occupancy.size()); ++i) {
+			if (app.occupancy[i] == -1) {
+				++freeCells;
+				if (!(*app.tiles)[i].protectedDate) return false;
+			}
+		}
+		return freeCells == app.protectedCellCount;
+	}
+
+	static int findPieceAt(AppState& app, float x, float y)
+	{
+		for (int i = static_cast<int>(app.pieces.size()) - 1; i >= 0; --i) {
+			if (app.dragging && i == app.dragPiece) continue;
+			auto centers = pieceCenters(app.pieces[i]);
+			for (const auto& c : centers) {
+				float dx = x - c.first;
+				float dy = y - c.second;
+				if (dx * dx + dy * dy <= (drawR * 0.95f) * (drawR * 0.95f)) {
+					return i;
+				}
+			}
+		}
+		return -1;
+	}
+
+	static void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
+								float r, float g, float b, bool filled)
+	{
+		for (int ci : cells) {
+			if (ci < 0 || ci >= static_cast<int>(tiles.size())) continue;
+			glPushMatrix();
+			glTranslatef(tiles[ci].x, tiles[ci].y, 0.035f);
+			glColor3f(r, g, b);
+			if (filled) {
+				glEnable(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset(1.0f, 1.0f);
+				CreateHexVertices(GL_POLYGON, drawR * 0.96f);
+				glDisable(GL_POLYGON_OFFSET_FILL);
+			} else {
+				glLineWidth(2.2f);
+				CreateHexVertices(GL_LINE_LOOP, drawR * 1.03f);
+			}
+			glPopMatrix();
+		}
+	}
+
+	static void drawPieceState(const PieceState& p, bool selected, bool dragging)
+	{
+		const float fillR = drawR * 1.015f;
+		auto centers = pieceCenters(p);
+		for (const auto& c : centers) {
+			glPushMatrix();
+			glTranslatef(c.first, c.second, dragging ? 0.08f : 0.05f);
+			glEnable(GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset(1.0f, 1.0f);
+			float scale = dragging ? 0.88f : 0.70f;
+			glColor3f(p.def->r * scale, p.def->g * scale, p.def->b * scale);
+			CreateHexVertices(GL_POLYGON, fillR);
+			glDisable(GL_POLYGON_OFFSET_FILL);
+			glPopMatrix();
+		}
+
+		if (selected) glColor3f(1.0f, 1.0f, 1.0f);
+		else          glColor3f(p.def->r, p.def->g, p.def->b);
+		drawPieceOuterOutline(centers, R);
+
+		// Keep the original preview style: no extra visible handle and no black
+		// letter printed inside the piece.  The upper-left hex centre is still the
+		// invisible drag handle.
+		if (!p.placed || dragging) {
+			float minCY = 1e9f, maxCY = -1e9f;
+			for (const auto& c : centers) {
+				minCY = fminf(minCY, c.second);
+				maxCY = fmaxf(maxCY, c.second);
+			}
+			std::array<char, 4> lbl{};
+			lbl[0] = p.def->label;
+			glPushMatrix();
+			glTranslatef(p.x - 0.9f, (minCY + maxCY) * 0.5f, dragging ? 0.11f : 0.08f);
+			glColor3f(1.0f, 1.0f, 1.0f);
+			glText(lbl);
+			glPopMatrix();
+		}
+	}
+
+	static void drawPieces(const AppState& app)
+	{
+		for (int i = 0; i < static_cast<int>(app.pieces.size()); ++i) {
+			if (app.dragging && i == app.dragPiece) continue;
+			drawPieceState(app.pieces[i], i == app.selectedPiece, false);
+		}
+		if (app.dragging && app.dragPiece >= 0) {
+			drawPieceState(app.pieces[app.dragPiece], true, true);
+		}
+	}
+
+	static void drawVictoryBanner()
+	{
+		const float pulse = 0.5f + 0.5f * sinf(static_cast<float>(glfwGetTime()) * 5.0f);
+		glPushMatrix();
+		glTranslatef(-2.0f, 4.95f, 0.20f);
+		glColor3f(1.0f, 0.75f + 0.25f * pulse, 0.15f);
+		glText("SUCCESS!");
+		glPopMatrix();
+		glPushMatrix();
+		glTranslatef(-3.4f, 4.45f, 0.20f);
+		glColor3f(1.0f, 1.0f, 1.0f);
+		glText("Date is visible");
+		glPopMatrix();
+	}
+
+	static void cursorPosCallback(GLFWwindow*, double xpos, double ypos)
+	{
+		if (gApp == nullptr || !gApp->dragging || gApp->dragPiece < 0) return;
+		auto w = screenToWorld(xpos, ypos);
+		PieceState& p = gApp->pieces[gApp->dragPiece];
+		p.x = w.first + gApp->dragDx;
+		p.y = w.second + gApp->dragDy;
+		updateDragTarget(*gApp);
+	}
+
+	static void mouseButtonCallback(GLFWwindow* window, int button, int action, int)
+	{
+		if (gApp == nullptr || button != GLFW_MOUSE_BUTTON_LEFT) return;
+
+		double mx = 0.0, my = 0.0;
+		glfwGetCursorPos(window, &mx, &my);
+		auto w = screenToWorld(mx, my);
+
+		if (action == GLFW_PRESS) {
+			int pieceIndex = findPieceAt(*gApp, w.first, w.second);
+			if (pieceIndex < 0) return;
+
+			gApp->selectedPiece = pieceIndex;
+			PieceState& p = gApp->pieces[pieceIndex];
+			float hdx = w.first - p.x;
+			float hdy = w.second - p.y;
+			bool grabbedHandle = (hdx * hdx + hdy * hdy) <= (drawR * 0.75f) * (drawR * 0.75f);
+
+			gApp->savedPlaced = p.placed;
+			gApp->savedX = p.x;
+			gApp->savedY = p.y;
+			gApp->savedOffsets = p.offsets;
+			gApp->savedCells = p.occupiedCells;
+			gApp->ghostCells = p.placed ? p.occupiedCells : std::vector<int>{};
+
+			if (p.placed) {
+				clearPieceOccupancy(*gApp, pieceIndex);
+			}
+
+			if (!grabbedHandle) {
+				rotatePieceClockwise(p);
+				// After a rotate-grab, make the upper-left handle follow the cursor.
+				gApp->dragDx = 0.0f;
+				gApp->dragDy = 0.0f;
+				p.x = w.first;
+				p.y = w.second;
+			} else {
+				gApp->dragDx = p.x - w.first;
+				gApp->dragDy = p.y - w.second;
+			}
+
+			gApp->dragPiece = pieceIndex;
+			gApp->dragging = true;
+			gApp->solved = false;
+			updateDragTarget(*gApp);
+		} else if (action == GLFW_RELEASE) {
+			if (!gApp->dragging || gApp->dragPiece < 0) return;
+			int pieceIndex = gApp->dragPiece;
+			updateDragTarget(*gApp);
+			bool ok = placePiece(*gApp, pieceIndex, gApp->target);
+			if (!ok) {
+				restoreDraggedPiece(*gApp, pieceIndex);
+			}
+			gApp->dragging = false;
+			gApp->dragPiece = -1;
+			gApp->ghostCells.clear();
+			gApp->target = PlacementCandidate{};
+			gApp->solved = checkSolved(*gApp);
+		}
+	}
+
+	static void keyCallback(GLFWwindow*, int key, int, int action, int)
+	{
+		if (gApp == nullptr || action != GLFW_PRESS) return;
+		if ((key == GLFW_KEY_R || key == GLFW_KEY_SPACE) && gApp->selectedPiece >= 0 && !gApp->pieces[gApp->selectedPiece].placed) {
+			rotatePieceClockwise(gApp->pieces[gApp->selectedPiece]);
+			if (gApp->dragging) updateDragTarget(*gApp);
+		}
+		if (key == GLFW_KEY_ESCAPE && gApp->dragging && gApp->dragPiece >= 0) {
+			restoreDraggedPiece(*gApp, gApp->dragPiece);
+			gApp->dragging = false;
+			gApp->dragPiece = -1;
+			gApp->ghostCells.clear();
+			gApp->target = PlacementCandidate{};
+		}
+	}
+
 } // namespace
 
 int main()
 {
 
-    if (!glfwInit()) {
-        return -1;
-    }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(800, 600, "3D Hex Board", nullptr, nullptr);
-    if (!window) {
-        glfwTerminate();
-        return -1;
-    }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable VSync
+	if (!glfwInit()) {
+		return -1;
+	}
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	GLFWwindow* window = glfwCreateWindow(WINDOW_W, WINDOW_H, "3D Hex Board", nullptr, nullptr);
+	if (!window) {
+		glfwTerminate();
+		return -1;
+	}
+	glfwMakeContextCurrent(window);
+	glfwSwapInterval(1); // Enable VSync
 #ifdef _WIN32
-    FONT_BASE = glGenLists(96);
-    HFONT hFont = CreateFont(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, TEXT("Courier New"));
-    HDC hdc = wglGetCurrentDC();
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-    wglUseFontBitmaps(hdc, 32, 96, FONT_BASE);
-    SelectObject(hdc, hOldFont);
-    DeleteObject(hFont);
+	FONT_BASE = glGenLists(96);
+	HFONT hFont = CreateFont(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+							 ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+							 ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, TEXT("Courier New"));
+	HDC hdc = wglGetCurrentDC();
+	HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+	wglUseFontBitmaps(hdc, 32, 96, FONT_BASE);
+	SelectObject(hdc, hOldFont);
+	DeleteObject(hFont);
 #endif
 
-    glViewport(0, 0, 800, 600);
-    glEnable(GL_DEPTH_TEST);
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+	glViewport(0, 0, WINDOW_W, WINDOW_H);
+	glEnable(GL_DEPTH_TEST);
+	glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
 
-    // Get current date (thread-safe)
-    std::time_t t = std::time(nullptr);
-    std::tm now{};
+	// Get current date (thread-safe)
+	std::time_t t = std::time(nullptr);
+	std::tm now{};
 #ifdef _WIN32
-    if (localtime_s(&now, &t) != 0) {
+	if (localtime_s(&now, &t) != 0) {
 #else
-    if (!localtime_r(&t, &now)) {
+	if (!localtime_r(&t, &now)) {
 #endif
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return -1;
-    }
-    int today = now.tm_mday;
-    int month = now.tm_mon + 1;  // 1-12
-    int wday  = now.tm_wday;     // 0=Sunday
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+	int today = now.tm_mday;
+	int month = now.tm_mon + 1;  // 1-12
+	int wday  = now.tm_wday;     // 0=Sunday
 
 
-    // Build flat tile list from grid
-    std::vector<HexTile> tiles;
-    for (int row = 0; row < (int)grid.size(); ++row) {
-        int w = (int)grid[row].size();
-        float y = (4 - row) * sy;   // row 4 is the centre at y = 0
-        for (int col = 0; col < w; ++col) {
-            // Centre each row symmetrically; odd/even widths alternate
-            // between integer and half-integer multiples of sx, which is
-            // exactly what a regular pointy-top hex grid requires.
-            float x = (col - (w - 1) * 0.5f) * sx;
-            const Cell& c = grid[row][col];
-            bool hl = false;
-            switch (c.type) {
-                case CT_MONTH: hl = (c.value == month); break;
-                case CT_WDAY:  hl = (c.value == wday);  break;
-                case CT_DATE:  hl = (c.value == today);  break;
-            }
-            tiles.push_back({x, y, 0.0f, hl, c});
-        }
-    }
+	// Build flat tile list from grid
+	std::vector<HexTile> tiles;
+	for (int row = 0; row < (int)grid.size(); ++row) {
+		int w = (int)grid[row].size();
+		float y = (4 - row) * sy;   // row 4 is the centre at y = 0
+		for (int col = 0; col < w; ++col) {
+			// Centre each row symmetrically; odd/even widths alternate
+			// between integer and half-integer multiples of sx, which is
+			// exactly what a regular pointy-top hex grid requires.
+			float x = (col - (w - 1) * 0.5f) * sx;
+			const Cell& c = grid[row][col];
+			bool hl = false;
+			switch (c.type) {
+				case CT_MONTH: hl = (c.value == month); break;
+				case CT_WDAY:  hl = (c.value == wday);  break;
+				case CT_DATE:  hl = (c.value == today);  break;
+			}
+			bool protectedDate = hl && (c.type == CT_MONTH || c.type == CT_WDAY || c.type == CT_DATE);
+			tiles.push_back({ row, col, x, y, 0.0f, hl, protectedDate, c });
+		}
+	}
+
+	AppState app;
+	app.tiles = &tiles;
+	app.occupancy.assign(tiles.size(), -1);
+	for (const auto& tile : tiles) {
+		if (tile.protectedDate) ++app.protectedCellCount;
+	}
+	for (const auto& def : PieceDefinitions) {
+		PieceState ps;
+		ps.def = &def;
+		ps.offsets = makeLocalOffsets(def);
+		auto home = pieceHomeAnchor(def.label);
+		ps.x = home.first;
+		ps.y = home.second;
+		app.pieces.push_back(ps);
+	}
+	gApp = &app;
+	glfwSetCursorPosCallback(window, cursorPosCallback);
+	glfwSetMouseButtonCallback(window, mouseButtonCallback);
+	glfwSetKeyCallback(window, keyCallback);
+
+	char title[128];
+	snprintf(title, sizeof(title), "3D Hex Board - %04d-%02d-%02d %s",
+			 now.tm_year + 1900, month, today, weekNames[wday].data());
+	glfwSetWindowTitle(window, title);
 
 	// Set projection once before the loop
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    setPerspective(45.0f, 800.0f / 600.0f, 1.0f, 100.0f);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	setPerspective(45.0f, static_cast<float>(WINDOW_W) / static_cast<float>(WINDOW_H), 1.0f, 100.0f);
 	// Main loop
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        glTranslatef(0.0f, 0.0f, -20.0f);
-        glRotatef(0.0f, 1.0f, 0.0f, 0.0f);
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		glTranslatef(0.0f, 0.0f, -20.0f);
+		glRotatef(0.0f, 1.0f, 0.0f, 0.0f);
 
 		drawHex(0.0f, 0.0f, -0.01f, baseR, false, { CT_BASE, 0 });
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
-        }
-		drawPiecePreviews(PieceDefinitions);
-        glfwSwapBuffers(window);
-    }
+		}
+		if (!app.ghostCells.empty()) {
+			drawCellOverlay(tiles, app.ghostCells, 0.45f, 0.45f, 0.45f, true);
+		}
+		if (app.dragging && !app.target.cells.empty()) {
+			if (app.target.valid) {
+				drawCellOverlay(tiles, app.target.cells, 0.25f, 1.0f, 0.25f, false);
+			} else {
+				drawCellOverlay(tiles, app.target.cells, 1.0f, 0.25f, 0.25f, false);
+			}
+		}
+		drawPieces(app);
+		if (app.solved) {
+			drawVictoryBanner();
+		}
+		glfwSwapBuffers(window);
+	}
 #ifdef _WIN32
-    glDeleteLists(FONT_BASE, 96);
+	glDeleteLists(FONT_BASE, 96);
 #endif
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 0;
+	gApp = nullptr;
+	glfwDestroyWindow(window);
+	glfwTerminate();
+	return 0;
 }

@@ -403,9 +403,11 @@ namespace {
 		float savedY = 0.0f;
 		std::vector<std::pair<float, float>> savedOffsets;
 		std::vector<int> savedCells;
-		std::vector<int> ghostCells;        // grey frozen footprint while a placed piece is lifted
+		std::vector<std::pair<float, float>> ghostCenters; // grey frozen footprint of the original position
+		std::pair<float, float> dragLocal{ 0.0f, 0.0f }; // local centre of the hex being held
 		PlacementCandidate target;
 		bool solved = false;
+		bool showHelp = true;
 		int protectedCellCount = 0;
 	};
 
@@ -420,12 +422,12 @@ namespace {
 			case 'D': return { -9.6f, -3.5f };
 			case 'E': return { -9.6f, -5.7f };
 			case 'F': return { -0.2f, -5.5f };
-			case 'G': return { 6.1f, -6.0f };
-			case 'H': return { 6.1f, -2.6f };
-			case 'I': return { 6.1f, -0.2f };
-			case 'J': return { 6.1f,  3.2f };
-			case 'K': return { 6.1f,  6.2f };
-			default:  return { 6.0f,  0.0f };
+			case 'G': return {  6.1f, -6.0f };
+			case 'H': return {  6.1f, -2.6f };
+			case 'I': return {  6.1f, -0.2f };
+			case 'J': return {  6.1f,  3.2f };
+			case 'K': return {  6.1f,  6.2f };
+			default:  return {  6.0f,  0.0f };
 		}
 	}
 
@@ -466,21 +468,80 @@ namespace {
 		return result;
 	}
 
+	enum class PieceTransform { RotateCW, MirrorX };
+
+	static std::pair<float, float> transformedPoint(const std::pair<float, float>& c, PieceTransform tr)
+	{
+		float x = c.first;
+		float y = c.second;
+		if (tr == PieceTransform::RotateCW) {
+			// Pure geometric 60-degree clockwise rotation.
+			const float cs = 0.5f;
+			const float sn = -0.86602540378443864676f; // sin(-60 deg)
+			return { cs * x - sn * y, sn * x + cs * y };
+		}
+		// Left-right mirror.  On this pointy-top hex grid x -> -x keeps all
+		// hex centres on valid half-step rows.
+		return { -x, y };
+	}
+
+	static std::pair<float, float> applyPieceTransform(PieceState& p,
+													   PieceTransform tr,
+													   std::pair<float, float> keepLocal = { 0.0f, 0.0f },
+													   bool keepHexInPlace = false)
+	{
+		const std::pair<float, float> keepWorld{ p.x + keepLocal.first, p.y + keepLocal.second };
+
+		std::vector<std::pair<float, float>> transformed;
+		transformed.reserve(p.offsets.size());
+		for (const auto& c : p.offsets) {
+			auto t = transformedPoint(c, tr);
+			cleanTiny(t.first);
+			cleanTiny(t.second);
+			transformed.push_back(t);
+		}
+		auto newKeep = transformedPoint(keepLocal, tr);
+		cleanTiny(newKeep.first);
+		cleanTiny(newKeep.second);
+
+		if (!transformed.empty()) {
+			auto anchor = transformed[0];
+			for (const auto& c : transformed) {
+				if (topLeftLess(c, anchor)) anchor = c;
+			}
+			for (auto& c : transformed) {
+				c.first -= anchor.first;
+				c.second -= anchor.second;
+				cleanTiny(c.first);
+				cleanTiny(c.second);
+			}
+			newKeep.first -= anchor.first;
+			newKeep.second -= anchor.second;
+			cleanTiny(newKeep.first);
+			cleanTiny(newKeep.second);
+		}
+
+		std::sort(transformed.begin(), transformed.end(), [](const auto& a, const auto& b)
+				  {
+					  return topLeftLess(a, b);
+				  });
+		p.offsets = transformed;
+
+		if (keepHexInPlace) {
+			p.x = keepWorld.first - newKeep.first;
+			p.y = keepWorld.second - newKeep.second;
+		}
+		return newKeep;
+	}
+
 	static void rotatePieceClockwise(PieceState& p)
 	{
-		// Pure geometric 60-degree rotation.  This preserves the original preview
-		// shapes much better than converting through a rounded axial coordinate.
-		const float cs = 0.5f;
-		const float sn = -0.86602540378443864676f; // sin(-60 deg)
-		for (auto& c : p.offsets) {
-			float x = c.first;
-			float y = c.second;
-			c.first = cs * x - sn * y;
-			c.second = sn * x + cs * y;
-			cleanTiny(c.first);
-			cleanTiny(c.second);
-		}
-		normalizeToUpperLeft(p.offsets);
+		applyPieceTransform(p, PieceTransform::RotateCW);
+	}
+
+	static void mirrorPiece(PieceState& p)
+	{
+		applyPieceTransform(p, PieceTransform::MirrorX);
 	}
 
 	static std::vector<std::pair<float, float>> pieceCenters(const PieceState& p)
@@ -627,20 +688,45 @@ namespace {
 		return freeCells == app.protectedCellCount;
 	}
 
-	static int findPieceAt(AppState& app, float x, float y)
+	struct PieceHit {
+		int pieceIndex = -1;
+		int localIndex = -1;
+	};
+
+	static PieceHit findPieceHitAt(AppState& app, float x, float y)
 	{
 		for (int i = static_cast<int>(app.pieces.size()) - 1; i >= 0; --i) {
 			if (app.dragging && i == app.dragPiece) continue;
-			auto centers = pieceCenters(app.pieces[i]);
-			for (const auto& c : centers) {
-				float dx = x - c.first;
-				float dy = y - c.second;
+			const PieceState& p = app.pieces[i];
+			for (int j = 0; j < static_cast<int>(p.offsets.size()); ++j) {
+				float cx = p.x + p.offsets[j].first;
+				float cy = p.y + p.offsets[j].second;
+				float dx = x - cx;
+				float dy = y - cy;
 				if (dx * dx + dy * dy <= (drawR * 0.95f) * (drawR * 0.95f)) {
-					return i;
+					return { i, j };
 				}
 			}
 		}
-		return -1;
+		return {};
+	}
+
+	static void drawGhostFootprint(const std::vector<std::pair<float, float>>& centers)
+	{
+		if (centers.empty()) return;
+		const float fillR = drawR * 1.015f;
+		for (const auto& c : centers) {
+			glPushMatrix();
+			glTranslatef(c.first, c.second, 0.035f);
+			glEnable(GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset(1.0f, 1.0f);
+			glColor3f(0.38f, 0.38f, 0.38f);
+			CreateHexVertices(GL_POLYGON, fillR);
+			glDisable(GL_POLYGON_OFFSET_FILL);
+			glPopMatrix();
+		}
+		glColor3f(0.68f, 0.68f, 0.68f);
+		drawPieceOuterOutline(centers, R);
 	}
 
 	static void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
@@ -729,6 +815,42 @@ namespace {
 		glPopMatrix();
 	}
 
+	static void drawHelpTooltip(bool showHelp)
+	{
+		if (!showHelp) {
+			glPushMatrix();
+			glTranslatef(-10.55f, 7.55f, 0.30f);
+			glColor3f(0.75f, 0.75f, 0.75f);
+			glText("H/F1: help");
+			glPopMatrix();
+			return;
+		}
+
+		glPushMatrix();
+		glTranslatef(-10.75f, 7.75f, 0.28f);
+		glColor3f(0.03f, 0.03f, 0.06f);
+		glBegin(GL_QUADS);
+		glVertex3f(0.0f, 0.15f, 0.0f);
+		glVertex3f(8.2f, 0.15f, 0.0f);
+		glVertex3f(8.2f, -1.72f, 0.0f);
+		glVertex3f(0.0f, -1.72f, 0.0f);
+		glEnd();
+		glColor3f(1.0f, 1.0f, 1.0f);
+		glTranslatef(0.15f, -0.15f, 0.02f);
+		glText("Drag upper-left hex to move");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("Click other hex: rotate + drag");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("R/Space: rotate held piece");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("M: mirror held piece");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("Green=place, Red=blocked");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("Esc: cancel, H/F1: hide help");
+		glPopMatrix();
+	}
+
 	static void cursorPosCallback(GLFWwindow*, double xpos, double ypos)
 	{
 		if (gApp == nullptr || !gApp->dragging || gApp->dragPiece < 0) return;
@@ -748,38 +870,34 @@ namespace {
 		auto w = screenToWorld(mx, my);
 
 		if (action == GLFW_PRESS) {
-			int pieceIndex = findPieceAt(*gApp, w.first, w.second);
-			if (pieceIndex < 0) return;
+			PieceHit hit = findPieceHitAt(*gApp, w.first, w.second);
+			int pieceIndex = hit.pieceIndex;
+			if (pieceIndex < 0 || hit.localIndex < 0) return;
 
 			gApp->selectedPiece = pieceIndex;
 			PieceState& p = gApp->pieces[pieceIndex];
-			float hdx = w.first - p.x;
-			float hdy = w.second - p.y;
-			bool grabbedHandle = (hdx * hdx + hdy * hdy) <= (drawR * 0.75f) * (drawR * 0.75f);
+			bool grabbedHandle = (hit.localIndex == 0);
 
 			gApp->savedPlaced = p.placed;
 			gApp->savedX = p.x;
 			gApp->savedY = p.y;
 			gApp->savedOffsets = p.offsets;
 			gApp->savedCells = p.occupiedCells;
-			gApp->ghostCells = p.placed ? p.occupiedCells : std::vector<int>{};
+			gApp->ghostCenters = pieceCenters(p);
+			gApp->dragLocal = p.offsets[hit.localIndex];
 
 			if (p.placed) {
 				clearPieceOccupancy(*gApp, pieceIndex);
 			}
 
 			if (!grabbedHandle) {
-				rotatePieceClockwise(p);
-				// After a rotate-grab, make the upper-left handle follow the cursor.
-				gApp->dragDx = 0.0f;
-				gApp->dragDy = 0.0f;
-				p.x = w.first;
-				p.y = w.second;
-			} else {
-				gApp->dragDx = p.x - w.first;
-				gApp->dragDy = p.y - w.second;
+				// Rotate around the hex that was actually grabbed.  That hex stays
+				// visually in place; the rest of the piece swings around it.
+				gApp->dragLocal = applyPieceTransform(p, PieceTransform::RotateCW, gApp->dragLocal, true);
 			}
 
+			gApp->dragDx = p.x - w.first;
+			gApp->dragDy = p.y - w.second;
 			gApp->dragPiece = pieceIndex;
 			gApp->dragging = true;
 			gApp->solved = false;
@@ -794,27 +912,56 @@ namespace {
 			}
 			gApp->dragging = false;
 			gApp->dragPiece = -1;
-			gApp->ghostCells.clear();
+			gApp->ghostCenters.clear();
 			gApp->target = PlacementCandidate{};
 			gApp->solved = checkSolved(*gApp);
 		}
 	}
 
-	static void keyCallback(GLFWwindow*, int key, int, int action, int)
+	static void transformSelectedPiece(GLFWwindow* window, PieceTransform tr)
+	{
+		if (gApp == nullptr || gApp->selectedPiece < 0) return;
+		int pieceIndex = gApp->dragging ? gApp->dragPiece : gApp->selectedPiece;
+		if (pieceIndex < 0) return;
+		PieceState& p = gApp->pieces[pieceIndex];
+
+		if (gApp->dragging && pieceIndex == gApp->dragPiece) {
+			gApp->dragLocal = applyPieceTransform(p, tr, gApp->dragLocal, true);
+			double mx = 0.0, my = 0.0;
+			glfwGetCursorPos(window, &mx, &my);
+			auto w = screenToWorld(mx, my);
+			gApp->dragDx = p.x - w.first;
+			gApp->dragDy = p.y - w.second;
+			updateDragTarget(*gApp);
+		} else if (!p.placed) {
+			applyPieceTransform(p, tr);
+		}
+	}
+
+	static void keyCallback(GLFWwindow* window, int key, int, int action, int)
 	{
 		if (gApp == nullptr || action != GLFW_PRESS) return;
-		if ((key == GLFW_KEY_R || key == GLFW_KEY_SPACE) && gApp->selectedPiece >= 0 && !gApp->pieces[gApp->selectedPiece].placed) {
-			rotatePieceClockwise(gApp->pieces[gApp->selectedPiece]);
-			if (gApp->dragging) updateDragTarget(*gApp);
+		if (key == GLFW_KEY_H || key == GLFW_KEY_F1) {
+			gApp->showHelp = !gApp->showHelp;
+			return;
+		}
+		if (key == GLFW_KEY_R || key == GLFW_KEY_SPACE) {
+			transformSelectedPiece(window, PieceTransform::RotateCW);
+			return;
+		}
+		if (key == GLFW_KEY_M) {
+			transformSelectedPiece(window, PieceTransform::MirrorX);
+			return;
 		}
 		if (key == GLFW_KEY_ESCAPE && gApp->dragging && gApp->dragPiece >= 0) {
 			restoreDraggedPiece(*gApp, gApp->dragPiece);
 			gApp->dragging = false;
 			gApp->dragPiece = -1;
-			gApp->ghostCells.clear();
+			gApp->ghostCenters.clear();
 			gApp->target = PlacementCandidate{};
 		}
 	}
+
 
 } // namespace
 
@@ -864,7 +1011,7 @@ int main()
 	}
 	int today = now.tm_mday;
 	int month = now.tm_mon + 1;  // 1-12
-	int wday  = now.tm_wday;     // 0=Sunday
+	int wday = now.tm_wday;     // 0=Sunday
 
 
 	// Build flat tile list from grid
@@ -931,8 +1078,8 @@ int main()
 		for (const auto& tile : tiles) {
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
 		}
-		if (!app.ghostCells.empty()) {
-			drawCellOverlay(tiles, app.ghostCells, 0.45f, 0.45f, 0.45f, true);
+		if (!app.ghostCenters.empty()) {
+			drawGhostFootprint(app.ghostCenters);
 		}
 		if (app.dragging && !app.target.cells.empty()) {
 			if (app.target.valid) {
@@ -945,6 +1092,7 @@ int main()
 		if (app.solved) {
 			drawVictoryBanner();
 		}
+		drawHelpTooltip(app.showHelp);
 		glfwSwapBuffers(window);
 	}
 #ifdef _WIN32

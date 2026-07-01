@@ -206,70 +206,56 @@ namespace {
 
 	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z)
 	{
-		struct QPoint {
-			int x;
-			int y;
-			bool operator==(const QPoint& o) const noexcept { return x == o.x && y == o.y; }
-		};
-		struct QPointHash {
-			size_t operator()(const QPoint& p) const noexcept
-			{
-				return (static_cast<size_t>(static_cast<unsigned int>(p.x)) << 1) ^
-					static_cast<size_t>(static_cast<unsigned int>(p.y));
-			}
-		};
-		struct EdgeKey {
-			QPoint a;
-			QPoint b;
-			bool operator==(const EdgeKey& o) const noexcept { return a == o.a && b == o.b; }
-		};
-		struct EdgeKeyHash {
-			size_t operator()(const EdgeKey& e) const noexcept
-			{
-				return QPointHash{}(e.a) * 1315423911u ^ QPointHash{}(e.b);
-			}
-		};
+		if (centers.empty()) return;
 
-		auto quantizePoint = [](float x, float y) -> QPoint
+		const std::array<std::pair<float, float>, 6> vertexDir = { {
+			{ cosf(PI / 6.0f),  sinf(PI / 6.0f)  },
+			{ cosf(PI / 2.0f),  sinf(PI / 2.0f)  },
+			{ cosf(5.0f * PI / 6.0f),  sinf(5.0f * PI / 6.0f)  },
+			{ cosf(7.0f * PI / 6.0f),  sinf(7.0f * PI / 6.0f)  },
+			{ cosf(3.0f * PI / 2.0f),  sinf(3.0f * PI / 2.0f)  },
+			{ cosf(11.0f * PI / 6.0f), sinf(11.0f * PI / 6.0f) }
+		} };
+
+		const std::array<std::pair<float, float>, 6> neighbourDir = { {
+			{ 0.5f * sx,  sy },
+			{ -0.5f * sx, sy },
+			{ -sx,        0.0f },
+			{ -0.5f * sx, -sy },
+			{ 0.5f * sx,  -sy },
+			{ sx,         0.0f }
+		} };
+
+		auto hasNeighbour = [&](const std::pair<float, float>& c, const std::pair<float, float>& d) -> bool
 			{
-				constexpr float Q = 10000.0f;
-				return { static_cast<int>(lroundf(x * Q)), static_cast<int>(lroundf(y * Q)) };
-			};
-		auto makeEdgeKey = [](QPoint p1, QPoint p2) -> EdgeKey
-			{
-				if (p2.y < p1.y || (p2.y == p1.y && p2.x < p1.x)) {
-					QPoint t = p1; p1 = p2; p2 = t;
+				const float tx = c.first + d.first;
+				const float ty = c.second + d.second;
+				const float eps = 0.01f;
+
+				for (const auto& o : centers) {
+					if (fabsf(o.first - tx) < eps && fabsf(o.second - ty) < eps) {
+						return true;
+					}
 				}
-				return { p1, p2 };
+				return false;
 			};
 
-		std::unordered_map<EdgeKey, int, EdgeKeyHash> edgeUseCount;
-
-		for (const auto& c : centers) {
-			for (int i = 0; i < 6; ++i) {
-				float a1 = PI / 3.0f * (i + 0.5f);
-				float a2 = PI / 3.0f * ((i + 1) % 6 + 0.5f);
-				QPoint p1 = quantizePoint(c.first + radius * cosf(a1), c.second + radius * sinf(a1));
-				QPoint p2 = quantizePoint(c.first + radius * cosf(a2), c.second + radius * sinf(a2));
-				edgeUseCount[makeEdgeKey(p1, p2)]++;
-			}
-		}
-
-		// Draw the exterior edges as filled quad strips, not GL_LINES.
-		// This is more stable for the grey home ghost and avoids line-rasterizer
-		// artefacts at concave/polyhex vertices.  The end points are extended a
-		// little so neighbouring outline strips overlap cleanly at corners.
-		if (edgeUseCount.empty()) return;
-
-		constexpr float Q = 10000.0f;
+		// Draw only exterior edges.  Shared edges are detected from neighbouring
+		// hex centres, rather than by comparing rounded vertex coordinates.  This
+		// removes the initial B/C/E internal outline artefacts caused by tiny float
+		// differences between nominally identical edge vertices.
 		const float halfWidth = radius * 0.045f;
 		glBegin(GL_QUADS);
-		for (const auto& kv : edgeUseCount) {
-			if (kv.second == 1) {
-				float ax = kv.first.a.x / Q;
-				float ay = kv.first.a.y / Q;
-				float bx = kv.first.b.x / Q;
-				float by = kv.first.b.y / Q;
+		for (const auto& c : centers) {
+			for (int i = 0; i < 6; ++i) {
+				if (hasNeighbour(c, neighbourDir[i])) continue;
+
+				const auto& v1 = vertexDir[i];
+				const auto& v2 = vertexDir[(i + 1) % 6];
+				float ax = c.first + radius * v1.first;
+				float ay = c.second + radius * v1.second;
+				float bx = c.first + radius * v2.first;
+				float by = c.second + radius * v2.second;
 
 				float dx = bx - ax;
 				float dy = by - ay;
@@ -953,7 +939,7 @@ namespace {
 	{
 		if (!showHelp) {
 			glPushMatrix();
-			glTranslatef(-10.55f, 7.55f, 0.30f);
+			glTranslatef(-0.55f, 7.55f, 0.30f);
 			glColor3f(0.75f, 0.75f, 0.75f);
 			glText("H/F1: help");
 			glPopMatrix();
@@ -961,7 +947,7 @@ namespace {
 		}
 
 		glPushMatrix();
-		glTranslatef(-10.75f, 7.75f, 0.28f);
+		glTranslatef(-3.75f, 7.75f, 0.28f);
 		glColor3f(0.03f, 0.03f, 0.06f);
 		glBegin(GL_QUADS);
 		glVertex3f(0.0f, 0.15f, 0.0f);

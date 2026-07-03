@@ -6,6 +6,8 @@
 // and does not reach into the anonymous namespace of Hexa3DApp.cpp.
 
 #include "TileSolver.h"
+#include <numeric>
+#include <random>
 
 // ── file-local geometry helpers ──────────────────────────────────────────
 
@@ -114,6 +116,49 @@ static bool checkSolved(const AppState& app)
 	return freeCells == app.protectedCellCount;
 }
 
+// Capture a per-piece snapshot of the entire board so the user can
+// restore after a solver run with Esc.
+static void savePresolveState(AppState& app)
+{
+	const int n = (int)app.pieces.size();
+	app.presolveState.resize(n);
+	for (int i = 0; i < n; ++i) {
+		const PieceState& p = app.pieces[i];
+		PieceSnapshot& s    = app.presolveState[i];
+		s.x             = p.x;
+		s.y             = p.y;
+		s.placed        = p.placed;
+		s.offsets       = p.offsets;
+		s.occupiedCells = p.occupiedCells;
+		s.ghostCenters  = p.ghostCenters;
+	}
+}
+
+// Restore the board to the snapshot saved by savePresolveState.
+void restorePresolveState(AppState& app)
+{
+	if (app.presolveState.empty()) return;
+	// Clear all occupancy first.
+	app.occupancy.assign(app.occupancy.size(), -1);
+	const int n = (int)app.pieces.size();
+	for (int i = 0; i < n && i < (int)app.presolveState.size(); ++i) {
+		const PieceSnapshot& s = app.presolveState[i];
+		PieceState& p          = app.pieces[i];
+		p.x             = s.x;
+		p.y             = s.y;
+		p.placed        = s.placed;
+		p.offsets       = s.offsets;
+		p.occupiedCells = s.occupiedCells;
+		p.ghostCenters  = s.ghostCenters;
+		if (p.placed) {
+			for (int c : p.occupiedCells)
+				if (c >= 0 && c < (int)app.occupancy.size())
+					app.occupancy[c] = i;
+		}
+	}
+	app.solved = checkSolved(app);
+}
+
 // ── orientation generation ───────────────────────────────────────────────
 
 static std::string orientationKey(const Offsets& o)
@@ -155,9 +200,16 @@ void generateOrientations(const Offsets& base, std::vector<Offsets>& out)
 
 // ── backtracking solver ──────────────────────────────────────────────────
 
+// solveBacktrack places pieces in the order given by pieceOrder[].
+// When a full solution is found it decrements *skipRemaining; if the
+// counter reaches 0 the solution is accepted and the function returns true.
+// This lets the caller enumerate solutions by passing skip=0 (first),
+// skip=1 (second), etc.
 static bool solveBacktrack(AppState& app,
 							const std::vector<std::vector<Offsets>>& orientations,
-							std::vector<bool>& placed)
+							const std::vector<int>& pieceOrder,
+							std::vector<bool>& placed,
+							int& skipRemaining)
 {
 	const auto& tiles = *app.tiles;
 
@@ -169,17 +221,19 @@ static bool solveBacktrack(AppState& app,
 			break;
 		}
 	}
-	if (target == -1) return true; // all free cells covered → solved
+	if (target == -1) {
+		// All free cells covered — this is a complete solution.
+		if (skipRemaining > 0) { --skipRemaining; return false; }
+		return true;
+	}
 
 	const float tx = tiles[target].x;
 	const float ty = tiles[target].y;
 
-	for (int pi = 0; pi < (int)app.pieces.size(); ++pi) {
+	for (int pi : pieceOrder) {
 		if (placed[pi]) continue;
 		for (const auto& ori : orientations[pi]) {
-			// Try covering the target cell with each hex k of this orientation.
 			for (int k = 0; k < (int)ori.size(); ++k) {
-				// Compute where the anchor tile would land.
 				int anchorTile = nearestCell(tiles,
 											 tx - ori[k].first,
 											 ty - ori[k].second,
@@ -189,7 +243,6 @@ static bool solveBacktrack(AppState& app,
 				const float snapX = tiles[anchorTile].x;
 				const float snapY = tiles[anchorTile].y;
 
-				// Validate all hexes of the orientation.
 				std::vector<int> cells;
 				cells.reserve(ori.size());
 				bool ok = true;
@@ -208,19 +261,20 @@ static bool solveBacktrack(AppState& app,
 
 				// Place.
 				for (int c : cells) app.occupancy[c] = pi;
-				placed[pi]                  = true;
-				app.pieces[pi].x            = snapX;
-				app.pieces[pi].y            = snapY;
-				app.pieces[pi].offsets      = ori;
+				placed[pi]                   = true;
+				app.pieces[pi].x             = snapX;
+				app.pieces[pi].y             = snapY;
+				app.pieces[pi].offsets       = ori;
 				app.pieces[pi].occupiedCells = cells;
-				app.pieces[pi].placed       = true;
+				app.pieces[pi].placed        = true;
 
-				if (solveBacktrack(app, orientations, placed)) return true;
+				if (solveBacktrack(app, orientations, pieceOrder, placed, skipRemaining))
+					return true;
 
 				// Unplace.
 				for (int c : cells) app.occupancy[c] = -1;
-				placed[pi]                  = false;
-				app.pieces[pi].placed       = false;
+				placed[pi]                   = false;
+				app.pieces[pi].placed        = false;
 				app.pieces[pi].occupiedCells.clear();
 			}
 		}
@@ -228,13 +282,10 @@ static bool solveBacktrack(AppState& app,
 	return false;
 }
 
-// ── public entry point ───────────────────────────────────────────────────
+// ── shared setup / teardown ──────────────────────────────────────────────
 
-bool solvePuzzle(AppState& app)
+static void resetAllPieces(AppState& app)
 {
-	if (app.dragging) return false;
-
-	// Reset every piece to home and clear occupancy.
 	app.occupancy.assign(app.occupancy.size(), -1);
 	for (int i = 0; i < (int)app.pieces.size(); ++i) {
 		app.pieces[i].placed = false;
@@ -244,28 +295,81 @@ bool solvePuzzle(AppState& app)
 	app.undoStack.clear();
 	app.redoStack.clear();
 	app.solved = false;
+}
 
-	// Generate orientations from each piece's normalised home offsets.
-	std::vector<std::vector<Offsets>> orientations(app.pieces.size());
-	for (int i = 0; i < (int)app.pieces.size(); ++i)
-		generateOrientations(app.pieces[i].homeOffsets, orientations[i]);
-
+static bool runSolver(AppState& app,
+					  const std::vector<std::vector<Offsets>>& orientations,
+					  const std::vector<int>& pieceOrder)
+{
 	std::vector<bool> placed(app.pieces.size(), false);
-	const bool found = solveBacktrack(app, orientations, placed);
-
+	const bool found = solveBacktrack(app, orientations, pieceOrder, placed,
+									  app.solverSkipCount);
 	if (found) {
-		// Update ghost silhouettes to match the solution positions.
 		for (auto& p : app.pieces)
 			p.ghostCenters = pieceCenters(p);
 		app.solved = checkSolved(app);
 	} else {
-		// No solution found — put everything back home.
-		app.occupancy.assign(app.occupancy.size(), -1);
-		for (int i = 0; i < (int)app.pieces.size(); ++i) {
-			app.pieces[i].placed = false;
-			app.pieces[i].occupiedCells.clear();
-			restorePieceToHome(app, i);
-		}
+		resetAllPieces(app);
 	}
+	return found;
+}
+
+// ── public entry points ──────────────────────────────────────────────────
+
+bool solvePuzzle(AppState& app)
+{
+	if (app.solverRunning || app.dragging) return false;
+	app.solverRunning = true;
+
+	savePresolveState(app);
+	resetAllPieces(app);
+
+	std::vector<std::vector<Offsets>> orientations(app.pieces.size());
+	for (int i = 0; i < (int)app.pieces.size(); ++i)
+		generateOrientations(app.pieces[i].homeOffsets, orientations[i]);
+
+	// Deterministic piece order 0..N-1.
+	std::vector<int> order((int)app.pieces.size());
+	std::iota(order.begin(), order.end(), 0);
+
+	const bool found = runSolver(app, orientations, order);
+	if (found)
+		++app.solverSkipCount;   // next press will find the following solution
+	else
+		app.solverSkipCount = 0; // wrapped around — restart from the first
+
+	app.solverRunning = false;
+	return found;
+}
+
+bool solvePuzzleRandom(AppState& app)
+{
+	if (app.solverRunning || app.dragging) return false;
+	app.solverRunning = true;
+
+	savePresolveState(app);
+	resetAllPieces(app);
+
+	std::vector<std::vector<Offsets>> orientations(app.pieces.size());
+	for (int i = 0; i < (int)app.pieces.size(); ++i)
+		generateOrientations(app.pieces[i].homeOffsets, orientations[i]);
+
+	// Randomized piece order — shuffle both the piece list and each
+	// piece's orientation list so every press yields a different solution.
+	static std::mt19937 rng{ std::random_device{}() };
+	std::vector<int> order((int)app.pieces.size());
+	std::iota(order.begin(), order.end(), 0);
+	std::shuffle(order.begin(), order.end(), rng);
+	for (auto& oriList : orientations)
+		std::shuffle(oriList.begin(), oriList.end(), rng);
+
+	// For the randomized mode solverSkipCount is reset to 0 — each call
+	// finds the first solution in the freshly shuffled order, which is
+	// effectively a new random solution.
+	app.solverSkipCount = 0;
+
+	const bool found = runSolver(app, orientations, order);
+
+	app.solverRunning = false;
 	return found;
 }

@@ -101,6 +101,10 @@ struct AppState {
 	int   protectedCellCount = 0;
 	std::vector<MoveHistoryEntry>       undoStack;
 	std::vector<MoveHistoryEntry>       redoStack;
+	// ── solver state ──────────────────────────────────────────────────────
+	std::vector<PieceSnapshot>          presolveState;   // board snapshot before the last solver run
+	bool  solverRunning   = false;       // guard: ignore s/S while solving
+	int   solverSkipCount = 0;           // how many solutions to skip (enumerate)
 };
 
 // ── Solver API ────────────────────────────────────────────────────────────
@@ -111,6 +115,16 @@ using Offsets = std::vector<std::pair<float,float>>;
 // Build the set of unique orientations (up to 12) for a piece.
 void generateOrientations(const Offsets& base, std::vector<Offsets>& out);
 
-// Reset all pieces to home, run backtracking solver, place on success.
+// Restore the board to the snapshot taken just before the last solver run.
+void restorePresolveState(AppState& app);
+
+// Deterministic solve: finds the (solverSkipCount+1)-th solution in search order.
+// Increments solverSkipCount on success so the next call finds the following one.
 // Returns true if a solution was found.
 bool solvePuzzle(AppState& app);
+
+// Randomized solve: shuffles piece/orientation order, finds the
+// (solverSkipCount+1)-th solution in the shuffled order.
+// Resets solverSkipCount to 0 on every call before searching.
+// Returns true if a solution was found.
+bool solvePuzzleRandom(AppState& app);

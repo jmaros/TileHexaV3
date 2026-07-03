@@ -878,10 +878,10 @@ namespace {
 		glTranslatef(-3.75f, 7.75f, 0.28f);
 		glColor3f(0.03f, 0.03f, 0.06f);
 		glBegin(GL_QUADS);
-		glVertex3f(0.0f, 0.15f, 0.0f);
-		glVertex3f(8.2f, 0.15f, 0.0f);
-		glVertex3f(8.2f, -2.35f, 0.0f);
-		glVertex3f(0.0f, -2.35f, 0.0f);
+		glVertex3f(0.0f,  0.15f, 0.0f);
+		glVertex3f(8.8f,  0.15f, 0.0f);
+		glVertex3f(8.8f, -2.95f, 0.0f);
+		glVertex3f(0.0f, -2.95f, 0.0f);
 		glEnd();
 		glColor3f(1.0f, 1.0f, 1.0f);
 		glTranslatef(0.15f, -0.15f, 0.02f);
@@ -897,9 +897,13 @@ namespace {
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("Drop outside: return home");
 		glTranslatef(0.0f, -0.30f, 0.0f);
-		glText("Esc: cancel, Ctrl+Z/Y: undo/redo");
+		glText("Ctrl+Z/Y: undo/redo");
 		glTranslatef(0.0f, -0.30f, 0.0f);
-		glText("S: auto-solve puzzle");
+		glText("s: next deterministic solution");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("S: next randomized solution");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("Esc: cancel drag / restore pre-solve");
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("H/F1: hide help");
 		glPopMatrix();
@@ -1008,7 +1012,8 @@ namespace {
 	void keyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	{
 		if (gApp == nullptr || action != GLFW_PRESS) return;
-		const bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
+		const bool ctrl  = (mods & GLFW_MOD_CONTROL) != 0;
+		const bool shift = (mods & GLFW_MOD_SHIFT)   != 0;
 		if (ctrl && key == GLFW_KEY_Z) {
 			undoLastMove(*gApp);
 			return;
@@ -1034,14 +1039,29 @@ namespace {
 			return;
 		}
 		if (key == GLFW_KEY_S) {
-			solvePuzzle(*gApp);
+			if (gApp->solverRunning) return; // busy — ignore
+			if (shift) {
+				// S (uppercase) — randomized; each press finds a fresh random solution
+				solvePuzzleRandom(*gApp);
+			} else {
+				// s (lowercase) — deterministic; repeated presses cycle through solutions
+				solvePuzzle(*gApp);
+			}
 			return;
 		}
-		if (key == GLFW_KEY_ESCAPE && gApp->dragging && gApp->dragPiece >= 0) {
-			restoreDraggedPiece(*gApp, gApp->dragPiece);
-			gApp->dragging = false;
-			gApp->dragPiece = -1;
-			gApp->target = PlacementCandidate{};
+		if (key == GLFW_KEY_ESCAPE) {
+			if (gApp->dragging && gApp->dragPiece >= 0) {
+				// Cancel an in-progress drag.
+				restoreDraggedPiece(*gApp, gApp->dragPiece);
+				gApp->dragging  = false;
+				gApp->dragPiece = -1;
+				gApp->target    = PlacementCandidate{};
+			} else if (!gApp->presolveState.empty()) {
+				// Esc after a solver run — undo the solver placement.
+				restorePresolveState(*gApp);
+				gApp->presolveState.clear();
+				gApp->solverSkipCount = 0;
+			}
 		}
 	}
 

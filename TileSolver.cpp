@@ -132,6 +132,8 @@ static void savePresolveState(AppState& app)
 		s.occupiedCells = p.occupiedCells;
 		s.ghostCenters  = p.ghostCenters;
 	}
+	app.presolveUndoStack = app.undoStack;
+	app.presolveRedoStack = app.redoStack;
 }
 
 // Restore the board to the snapshot saved by savePresolveState.
@@ -156,6 +158,8 @@ void restorePresolveState(AppState& app)
 					app.occupancy[c] = i;
 		}
 	}
+	app.undoStack = app.presolveUndoStack;
+	app.redoStack = app.presolveRedoStack;
 	app.solved = checkSolved(app);
 }
 
@@ -288,9 +292,12 @@ static void resetAllPieces(AppState& app)
 {
 	app.occupancy.assign(app.occupancy.size(), -1);
 	for (int i = 0; i < (int)app.pieces.size(); ++i) {
+		// Preserve ghostCenters — they hold the permanent home silhouette.
+		const auto savedGhost = app.pieces[i].ghostCenters;
 		app.pieces[i].placed = false;
 		app.pieces[i].occupiedCells.clear();
 		restorePieceToHome(app, i);
+		app.pieces[i].ghostCenters = savedGhost;
 	}
 	app.undoStack.clear();
 	app.redoStack.clear();
@@ -316,60 +323,54 @@ static bool runSolver(AppState& app,
 
 // ── public entry points ──────────────────────────────────────────────────
 
-bool solvePuzzle(AppState& app)
+// Phase 1: called from the key handler.
+// Picks a random label, arms the pending flag, sets solverRunning so the
+// banner is visible during the very next rendered frame.
+void prepareSolve(AppState& app, bool randomize)
 {
-	if (app.solverRunning || app.dragging) return false;
-	app.solverRunning = true;
+	if (app.solverRunning || app.solverPending || app.dragging) return;
 
-	savePresolveState(app);
+	static std::mt19937 rng{ std::random_device{}() };
+	static const char* labels[] = { "Searching...", "Thinking...", "Solving..." };
+	app.solverLabel    = labels[std::uniform_int_distribution<int>(0, 2)(rng)];
+	app.solverRandomize = randomize;
+	app.solverRunning  = true;   // banner becomes visible immediately
+	app.solverPending  = true;   // executePendingSolve will run after the swap
+}
+
+// Phase 2: called from the render loop AFTER glfwSwapBuffers.
+// The user has already seen one frame with the label; now we actually solve.
+void executePendingSolve(AppState& app)
+{
+	if (!app.solverPending) return;
+	app.solverPending = false;
+
+	// Snapshot only on the very first call in a sequence.
+	if (app.presolveState.empty())
+		savePresolveState(app);
+
 	resetAllPieces(app);
 
 	std::vector<std::vector<Offsets>> orientations(app.pieces.size());
 	for (int i = 0; i < (int)app.pieces.size(); ++i)
 		generateOrientations(app.pieces[i].homeOffsets, orientations[i]);
 
-	// Deterministic piece order 0..N-1.
 	std::vector<int> order((int)app.pieces.size());
 	std::iota(order.begin(), order.end(), 0);
+
+	if (app.solverRandomize) {
+		static std::mt19937 rng2{ std::random_device{}() };
+		std::shuffle(order.begin(), order.end(), rng2);
+		for (auto& oriList : orientations)
+			std::shuffle(oriList.begin(), oriList.end(), rng2);
+		app.solverSkipCount = 0;
+	}
 
 	const bool found = runSolver(app, orientations, order);
 	if (found)
-		++app.solverSkipCount;   // next press will find the following solution
+		++app.solverSkipCount;
 	else
-		app.solverSkipCount = 0; // wrapped around — restart from the first
+		app.solverSkipCount = 0;
 
-	app.solverRunning = false;
-	return found;
-}
-
-bool solvePuzzleRandom(AppState& app)
-{
-	if (app.solverRunning || app.dragging) return false;
-	app.solverRunning = true;
-
-	savePresolveState(app);
-	resetAllPieces(app);
-
-	std::vector<std::vector<Offsets>> orientations(app.pieces.size());
-	for (int i = 0; i < (int)app.pieces.size(); ++i)
-		generateOrientations(app.pieces[i].homeOffsets, orientations[i]);
-
-	// Randomized piece order — shuffle both the piece list and each
-	// piece's orientation list so every press yields a different solution.
-	static std::mt19937 rng{ std::random_device{}() };
-	std::vector<int> order((int)app.pieces.size());
-	std::iota(order.begin(), order.end(), 0);
-	std::shuffle(order.begin(), order.end(), rng);
-	for (auto& oriList : orientations)
-		std::shuffle(oriList.begin(), oriList.end(), rng);
-
-	// For the randomized mode solverSkipCount is reset to 0 — each call
-	// finds the first solution in the freshly shuffled order, which is
-	// effectively a new random solution.
-	app.solverSkipCount = 0;
-
-	const bool found = runSolver(app, orientations, order);
-
-	app.solverRunning = false;
-	return found;
+	app.solverRunning = false;   // banner switches from label to SUCCESS / nothing
 }

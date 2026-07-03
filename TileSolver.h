@@ -102,9 +102,14 @@ struct AppState {
 	std::vector<MoveHistoryEntry>       undoStack;
 	std::vector<MoveHistoryEntry>       redoStack;
 	// ── solver state ──────────────────────────────────────────────────────
-	std::vector<PieceSnapshot>          presolveState;   // board snapshot before the last solver run
-	bool  solverRunning   = false;       // guard: ignore s/S while solving
-	int   solverSkipCount = 0;           // how many solutions to skip (enumerate)
+	std::vector<PieceSnapshot>          presolveState;        // piece snapshot before the last solver run
+	std::vector<MoveHistoryEntry>       presolveUndoStack;    // undo history saved before solver runs
+	std::vector<MoveHistoryEntry>       presolveRedoStack;    // redo history saved before solver runs
+	bool  solverRunning   = false;  // true while the label frame is displayed (before actual search)
+	bool  solverPending   = false;  // true after prepareSolve: executePendingSolve will fire next tick
+	bool  solverRandomize = false;  // true = randomized mode, false = deterministic
+	int   solverSkipCount = 0;      // how many solutions to skip (enumerate)
+	std::string solverLabel{};      // "Searching…" / "Thinking…" / "Solving…"
 };
 
 // ── Solver API ────────────────────────────────────────────────────────────
@@ -118,13 +123,10 @@ void generateOrientations(const Offsets& base, std::vector<Offsets>& out);
 // Restore the board to the snapshot taken just before the last solver run.
 void restorePresolveState(AppState& app);
 
-// Deterministic solve: finds the (solverSkipCount+1)-th solution in search order.
-// Increments solverSkipCount on success so the next call finds the following one.
-// Returns true if a solution was found.
-bool solvePuzzle(AppState& app);
+// Phase 1 (call from key handler): pick a label, set solverPending=true,
+// solverRunning=true so the banner renders on the very next frame.
+void prepareSolve(AppState& app, bool randomize);
 
-// Randomized solve: shuffles piece/orientation order, finds the
-// (solverSkipCount+1)-th solution in the shuffled order.
-// Resets solverSkipCount to 0 on every call before searching.
-// Returns true if a solution was found.
-bool solvePuzzleRandom(AppState& app);
+// Phase 2 (call from render loop AFTER glfwSwapBuffers): if solverPending,
+// run the actual backtracking and clear the pending flag.
+void executePendingSolve(AppState& app);

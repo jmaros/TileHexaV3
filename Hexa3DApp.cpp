@@ -853,13 +853,21 @@ namespace {
 		}
 	}
 
-	void drawVictoryBanner()
+	void drawStatusBanner(const AppState& app)
 	{
 		const float pulse = 0.5f + 0.5f * sinf(static_cast<float>(glfwGetTime()) * 5.0f);
 		glPushMatrix();
-		glTranslatef(-2.0f, 4.95f, 0.20f);
-		glColor3f(1.0f, 0.75f + 0.25f * pulse, 0.15f);
-		glText("SUCCESS!");
+		glTranslatef(-2.8f, 4.95f, 0.20f);
+		if (app.solverRunning && !app.solverLabel.empty()) {
+			// Phase-1 frame: one rendered frame showing the searching label
+			// before executePendingSolve runs the actual backtracking.
+			glColor3f(0.4f + 0.6f * pulse, 0.85f, 1.0f);
+			glText(app.solverLabel.c_str());
+		} else if (app.solved) {
+			// Both manual and solver-found solutions show SUCCESS.
+			glColor3f(1.0f, 0.75f + 0.25f * pulse, 0.15f);
+			glText("SUCCESS!");
+		}
 		glPopMatrix();
 	}
 
@@ -1039,13 +1047,12 @@ namespace {
 			return;
 		}
 		if (key == GLFW_KEY_S) {
-			if (gApp->solverRunning) return; // busy — ignore
 			if (shift) {
 				// S (uppercase) — randomized; each press finds a fresh random solution
-				solvePuzzleRandom(*gApp);
+				prepareSolve(*gApp, /*randomize=*/true);
 			} else {
 				// s (lowercase) — deterministic; repeated presses cycle through solutions
-				solvePuzzle(*gApp);
+				prepareSolve(*gApp, /*randomize=*/false);
 			}
 			return;
 		}
@@ -1057,11 +1064,12 @@ namespace {
 				gApp->dragPiece = -1;
 				gApp->target    = PlacementCandidate{};
 			} else if (!gApp->presolveState.empty()) {
-				// Esc after a solver run — undo the solver placement.
-				restorePresolveState(*gApp);
-				gApp->presolveState.clear();
-				gApp->solverSkipCount = 0;
-			}
+					// Esc after a solver run — undo the solver placement.
+					restorePresolveState(*gApp);
+					gApp->presolveState.clear();
+					gApp->solverSkipCount = 0;
+					gApp->solverLabel.clear();
+				}
 		}
 	}
 
@@ -1186,7 +1194,8 @@ int main()
 			drawHex(tile.x, tile.y, tile.z, drawR, tile.highlight, tile.content);
 		}
 		for (const auto& piece : app.pieces) {
-			if (!piece.ghostCenters.empty() && shouldDrawHomeGhost(piece)) {
+			if (!piece.ghostCenters.empty() &&
+				(app.solved || shouldDrawHomeGhost(piece))) {
 				drawGhostFootprint(piece.ghostCenters);
 			}
 		}
@@ -1198,11 +1207,10 @@ int main()
 			}
 		}
 		drawPieces(app);
-		if (app.solved) {
-			drawVictoryBanner();
-		}
+		drawStatusBanner(app);
 		drawHelpTooltip(app.showHelp);
 		glfwSwapBuffers(window);
+		executePendingSolve(app); // runs after the label frame is displayed
 	}
 #ifdef _WIN32
 	glDeleteLists(FONT_BASE, 96);

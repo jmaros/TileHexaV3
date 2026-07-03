@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <string>
+#include "TileSolver.h"
 
 constexpr float PI = 3.14159265358979323846f;
 
@@ -32,10 +33,7 @@ const float sy = 1.5f * R;
 constexpr int WINDOW_W = 800;
 constexpr int WINDOW_H = 600;
 
-// Cell descriptor -------------------------------------------------------
-struct Cell { int type, value; };
-// type: -1=base, 0=empty,  1=month(1-12),  2=weekday(0=Sun..6=Sat),  3=date(1-31)
-enum { CT_BASE = -1, CT_EMPTY = 0, CT_MONTH = 1, CT_WDAY = 2, CT_DATE = 3 };
+// Cell descriptor and enums are defined in TileSolver.h
 GLuint FONT_BASE = 0;   // bitmap-font display-list base; set after GL context is created
 
 // 9-row layout (row 4 = centre, y = 0)
@@ -79,22 +77,9 @@ const std::vector<std::vector<Cell>> grid = {
 //  Row 3 (8): ***  Feb  1   2    3    4    5    6   Nov
 //  Row 4 (9): - Jan  7    8    9   10   11   12   13  Dec
 
-struct HexTile {
-	int row, col;
-	float x, y, z;
-	bool highlight;
-	bool protectedDate;  // the current month / weekday / day cells must stay visible
-	Cell content;
-};
+// HexTile is defined in TileSolver.h
 
-// -----------------------------------------------------------------------
-// Puzzle-piece preview data (Solution 1)
-// -----------------------------------------------------------------------
-struct PieceDefinition {
-	char                               label;
-	std::vector<std::pair<float, float>> offsets; // final local offsets in world units
-	float                              r, g, b;
-};
+// PieceDefinition is defined in TileSolver.h
 
 const std::vector<PieceDefinition> PieceDefinitions = {
 	{ 'A', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{3.0f * sx,0.0f},{4.0f * sx,0.0f}}, 1.0f,1.0f,0.3f },
@@ -103,7 +88,6 @@ const std::vector<PieceDefinition> PieceDefinitions = {
 	{ 'D', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{3.0f * sx,0.0f},{3.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
 	{ 'E', {{-1.5f * sx,0.0f},{-0.5f * sx,0.0f},{0.5f * sx,0.0f},{0.0f * sx,-1.0f * sy},{1.0f * sx,-1.0f * sy},{2.0f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
 	{ 'F', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy}}, 1.0f,1.0f,0.3f },
-	// G is a 5-hex piece: top row 2, second row 2, bottom row 1.
 	{ 'G', {{0.0f,0.0f},{1.0f * sx,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{1.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
 	{ 'H', {{0.0f,0.0f},{0.5f * sx,-1.0f * sy},{1.5f * sx,-1.0f * sy},{2.5f * sx,-1.0f * sy},{3.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
 	{ 'I', {{0.0f,0.0f},{1.0f * sx,0.0f},{2.0f * sx,0.0f},{2.5f * sx,-1.0f * sy},{3.0f * sx,-2.0f * sy}}, 1.0f,1.0f,0.3f },
@@ -360,68 +344,8 @@ namespace {
 	}
 
 
-	struct PlacementCandidate {
-		bool valid = false;
-		bool outsideBoard = false; // true when the anchor or any piece hex is not on the board
-		std::vector<int> cells;
-		float snapX = 0.0f;
-		float snapY = 0.0f;
-	};
-
-	struct PieceState {
-		const PieceDefinition* def = nullptr;
-		// Local hex-centre offsets in world units.  Any hex can be grabbed;
-		// the original upper-left cell remains the local anchor.
-		std::vector<std::pair<float, float>> offsets;
-		float x = 0.0f;                   // world position of the upper-left handle cell
-		float y = 0.0f;
-		bool placed = false;
-		std::vector<int> occupiedCells;
-		float homeX = 0.0f;
-		float homeY = 0.0f;
-		std::vector<std::pair<float, float>> homeOffsets;
-		std::vector<std::pair<float, float>> ghostCenters; // permanent grey footprint of the original start position
-	};
-
-	struct PieceSnapshot {
-		float x = 0.0f;
-		float y = 0.0f;
-		bool placed = false;
-		std::vector<std::pair<float, float>> offsets;
-		std::vector<int> occupiedCells;
-		std::vector<std::pair<float, float>> ghostCenters;
-	};
-
-	struct MoveHistoryEntry {
-		int pieceIndex = -1;
-		PieceSnapshot before;
-		PieceSnapshot after;
-	};
-
-	struct AppState {
-		std::vector<HexTile>* tiles = nullptr;
-		std::vector<PieceState> pieces;
-		std::vector<int> occupancy;        // board cell -> piece index, -1 means free
-		int selectedPiece = -1;
-		int dragPiece = -1;
-		bool dragging = false;
-		float dragDx = 0.0f;
-		float dragDy = 0.0f;
-		bool savedPlaced = false;
-		float savedX = 0.0f;
-		float savedY = 0.0f;
-		std::vector<std::pair<float, float>> savedOffsets;
-		std::vector<int> savedCells;
-		std::vector<std::pair<float, float>> savedGhostCenters;
-		PieceSnapshot beforeDragSnapshot;
-		std::pair<float, float> dragLocal{ 0.0f, 0.0f }; // local centre of the hex being held
-		PlacementCandidate target;
-		bool solved = false;
-		bool showHelp = false;
-		int protectedCellCount = 0;
-		std::vector<MoveHistoryEntry> undoStack;
-		std::vector<MoveHistoryEntry> redoStack;
-	};
+	// PlacementCandidate, PieceState, PieceSnapshot, MoveHistoryEntry and AppState
+	// are defined in TileSolver.h
 
 	AppState* gApp = nullptr;
 
@@ -956,8 +880,8 @@ namespace {
 		glBegin(GL_QUADS);
 		glVertex3f(0.0f, 0.15f, 0.0f);
 		glVertex3f(8.2f, 0.15f, 0.0f);
-		glVertex3f(8.2f, -2.05f, 0.0f);
-		glVertex3f(0.0f, -2.05f, 0.0f);
+		glVertex3f(8.2f, -2.35f, 0.0f);
+		glVertex3f(0.0f, -2.35f, 0.0f);
 		glEnd();
 		glColor3f(1.0f, 1.0f, 1.0f);
 		glTranslatef(0.15f, -0.15f, 0.02f);
@@ -974,6 +898,8 @@ namespace {
 		glText("Drop outside: return home");
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("Esc: cancel, Ctrl+Z/Y: undo/redo");
+		glTranslatef(0.0f, -0.30f, 0.0f);
+		glText("S: auto-solve puzzle");
 		glTranslatef(0.0f, -0.30f, 0.0f);
 		glText("H/F1: hide help");
 		glPopMatrix();
@@ -1105,6 +1031,10 @@ namespace {
 		}
 		if (key == GLFW_KEY_M) {
 			transformSelectedPiece(window, PieceTransform::MirrorX);
+			return;
+		}
+		if (key == GLFW_KEY_S) {
+			solvePuzzle(*gApp);
 			return;
 		}
 		if (key == GLFW_KEY_ESCAPE && gApp->dragging && gApp->dragPiece >= 0) {

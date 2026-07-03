@@ -202,9 +202,9 @@ namespace {
 	}
 
 	// Forward declaration so drawPiecePreviews can always resolve this helper.
-	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z = 0.0f);
+	void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z = 0.0f);
 
-	static void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z)
+	void drawPieceOuterOutline(const std::vector<std::pair<float, float>>& centers, float radius, float z)
 	{
 		if (centers.empty()) return;
 
@@ -281,6 +281,7 @@ namespace {
 		glEnd();
 	}
 
+	[[maybe_unused]]
 	void drawPiecePreviews(const std::vector<PieceDefinition>& pieces)
 	{
 		const float pR = drawR;
@@ -422,11 +423,11 @@ namespace {
 		std::vector<MoveHistoryEntry> redoStack;
 	};
 
-	static AppState* gApp = nullptr;
+	AppState* gApp = nullptr;
 
-	static bool checkSolved(const AppState& app);
+	bool checkSolved(const AppState& app);
 
-	static std::pair<float, float> pieceHomeAnchor(char label)
+	std::pair<float, float> pieceHomeAnchor(char label)
 	{
 		switch (label) {
 			case 'A': return { -9.6f,  5.6f };
@@ -444,18 +445,18 @@ namespace {
 		}
 	}
 
-	static bool topLeftLess(const std::pair<float, float>& a, const std::pair<float, float>& b)
+	bool topLeftLess(const std::pair<float, float>& a, const std::pair<float, float>& b)
 	{
 		if (fabsf(a.second - b.second) > 0.001f) return a.second > b.second;
 		return a.first < b.first;
 	}
 
-	static void cleanTiny(float& v)
+	void cleanTiny(float& v)
 	{
 		if (fabsf(v) < 0.00001f) v = 0.0f;
 	}
 
-	static void normalizeToUpperLeft(std::vector<std::pair<float, float>>& offsets)
+	void normalizeToUpperLeft(std::vector<std::pair<float, float>>& offsets)
 	{
 		if (offsets.empty()) return;
 		auto anchor = offsets[0];
@@ -474,7 +475,7 @@ namespace {
 				  });
 	}
 
-	static std::vector<std::pair<float, float>> makeLocalOffsets(const PieceDefinition& p)
+	std::vector<std::pair<float, float>> makeLocalOffsets(const PieceDefinition& p)
 	{
 		auto result = p.offsets;
 		normalizeToUpperLeft(result);
@@ -483,7 +484,7 @@ namespace {
 
 	enum class PieceTransform { RotateCW, RotateCCW, MirrorX };
 
-	static std::pair<float, float> transformedPoint(const std::pair<float, float>& c, PieceTransform tr)
+	std::pair<float, float> transformedPoint(const std::pair<float, float>& c, PieceTransform tr)
 	{
 		float x = c.first;
 		float y = c.second;
@@ -500,7 +501,7 @@ namespace {
 		return { -x, y };
 	}
 
-	static std::pair<float, float> applyPieceTransform(PieceState& p,
+	std::pair<float, float> applyPieceTransform(PieceState& p,
 													   PieceTransform tr,
 													   std::pair<float, float> keepLocal = { 0.0f, 0.0f },
 													   bool keepHexInPlace = false)
@@ -549,22 +550,25 @@ namespace {
 		return newKeep;
 	}
 
-	static void rotatePieceClockwise(PieceState& p)
+	[[maybe_unused]]
+	void rotatePieceClockwise(PieceState& p)
 	{
 		applyPieceTransform(p, PieceTransform::RotateCW);
 	}
 
-	static void rotatePieceCounterClockwise(PieceState& p)
+	[[maybe_unused]]
+	void rotatePieceCounterClockwise(PieceState& p)
 	{
 		applyPieceTransform(p, PieceTransform::RotateCCW);
 	}
 
-	static void mirrorPiece(PieceState& p)
+	[[maybe_unused]]
+	void mirrorPiece(PieceState& p)
 	{
 		applyPieceTransform(p, PieceTransform::MirrorX);
 	}
 
-	static std::vector<std::pair<float, float>> pieceCenters(const PieceState& p)
+	std::vector<std::pair<float, float>> pieceCenters(const PieceState& p)
 	{
 		std::vector<std::pair<float, float>> centers;
 		centers.reserve(p.offsets.size());
@@ -574,7 +578,7 @@ namespace {
 		return centers;
 	}
 
-	static PieceSnapshot makeSnapshot(const PieceState& p)
+	PieceSnapshot makeSnapshot(const PieceState& p)
 	{
 		PieceSnapshot s;
 		s.x = p.x;
@@ -586,7 +590,7 @@ namespace {
 		return s;
 	}
 
-	static std::pair<float, float> screenToWorld(double sxPos, double syPos)
+	std::pair<float, float> screenToWorld(double sxPos, double syPos)
 	{
 		const float nx = static_cast<float>(2.0 * sxPos / WINDOW_W - 1.0);
 		const float ny = static_cast<float>(1.0 - 2.0 * syPos / WINDOW_H);
@@ -595,7 +599,7 @@ namespace {
 		return { nx * halfW, ny * halfH };
 	}
 
-	static int nearestCell(const std::vector<HexTile>& tiles, float x, float y, float maxDist)
+	int nearestCell(const std::vector<HexTile>& tiles, float x, float y, float maxDist)
 	{
 		int best = -1;
 		float bestD2 = maxDist * maxDist;
@@ -611,7 +615,7 @@ namespace {
 		return best;
 	}
 
-	static void clearPieceOccupancy(AppState& app, int pieceIndex)
+	void clearPieceOccupancy(AppState& app, int pieceIndex)
 	{
 		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
 		for (int c : app.pieces[pieceIndex].occupiedCells) {
@@ -623,7 +627,7 @@ namespace {
 		app.pieces[pieceIndex].placed = false;
 	}
 
-	static void applySnapshot(AppState& app, int pieceIndex, const PieceSnapshot& s)
+	void applySnapshot(AppState& app, int pieceIndex, const PieceSnapshot& s)
 	{
 		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
 		clearPieceOccupancy(app, pieceIndex);
@@ -645,7 +649,7 @@ namespace {
 		app.solved = checkSolved(app);
 	}
 
-	static PlacementCandidate computePlacementCandidate(const AppState& app, const PieceState& p)
+	PlacementCandidate computePlacementCandidate(const AppState& app, const PieceState& p)
 	{
 		PlacementCandidate result;
 		if (app.tiles == nullptr) return result;
@@ -690,14 +694,14 @@ namespace {
 		return result;
 	}
 
-	static void updateDragTarget(AppState& app)
+	void updateDragTarget(AppState& app)
 	{
 		app.target = PlacementCandidate{};
 		if (!app.dragging || app.dragPiece < 0) return;
 		app.target = computePlacementCandidate(app, app.pieces[app.dragPiece]);
 	}
 
-	static bool placePiece(AppState& app, int pieceIndex, const PlacementCandidate& placement)
+	bool placePiece(AppState& app, int pieceIndex, const PlacementCandidate& placement)
 	{
 		if (!placement.valid) return false;
 		PieceState& p = app.pieces[pieceIndex];
@@ -713,7 +717,7 @@ namespace {
 		return true;
 	}
 
-	static bool snapshotsEqual(const PieceSnapshot& a, const PieceSnapshot& b)
+	bool snapshotsEqual(const PieceSnapshot& a, const PieceSnapshot& b)
 	{
 		return a.x == b.x &&
 			a.y == b.y &&
@@ -723,7 +727,7 @@ namespace {
 			a.ghostCenters == b.ghostCenters;
 	}
 
-	static void restorePieceToHome(AppState& app, int pieceIndex)
+	void restorePieceToHome(AppState& app, int pieceIndex)
 	{
 		if (pieceIndex < 0 || pieceIndex >= static_cast<int>(app.pieces.size())) return;
 		clearPieceOccupancy(app, pieceIndex);
@@ -736,7 +740,7 @@ namespace {
 		// p.ghostCenters intentionally remains the permanent original home silhouette.
 	}
 
-	static void restoreDraggedPiece(AppState& app, int pieceIndex)
+	void restoreDraggedPiece(AppState& app, int pieceIndex)
 	{
 		PieceState& p = app.pieces[pieceIndex];
 		p.x = app.savedX;
@@ -755,7 +759,7 @@ namespace {
 		}
 	}
 
-	static bool checkSolved(const AppState& app)
+	bool checkSolved(const AppState& app)
 	{
 		if (app.tiles == nullptr) return false;
 		for (const auto& p : app.pieces) {
@@ -771,7 +775,7 @@ namespace {
 		return freeCells == app.protectedCellCount;
 	}
 
-	static void undoLastMove(AppState& app)
+	void undoLastMove(AppState& app)
 	{
 		if (app.dragging || app.undoStack.empty()) return;
 		MoveHistoryEntry h = app.undoStack.back();
@@ -780,7 +784,7 @@ namespace {
 		app.redoStack.push_back(h);
 	}
 
-	static void redoLastMove(AppState& app)
+	void redoLastMove(AppState& app)
 	{
 		if (app.dragging || app.redoStack.empty()) return;
 		MoveHistoryEntry h = app.redoStack.back();
@@ -794,7 +798,7 @@ namespace {
 		int localIndex = -1;
 	};
 
-	static PieceHit findPieceHitAt(AppState& app, float x, float y)
+	PieceHit findPieceHitAt(AppState& app, float x, float y)
 	{
 		for (int i = static_cast<int>(app.pieces.size()) - 1; i >= 0; --i) {
 			if (app.dragging && i == app.dragPiece) continue;
@@ -812,7 +816,7 @@ namespace {
 		return {};
 	}
 
-	static bool shouldDrawHomeGhost(const PieceState& p)
+	bool shouldDrawHomeGhost(const PieceState& p)
 	{
 		// Do not draw the permanent home silhouette while the piece itself is
 		// still exactly at home.  Drawing the grey ghost and the yellow piece on
@@ -820,7 +824,7 @@ namespace {
 		return fabsf(p.x - p.homeX) > 0.001f || fabsf(p.y - p.homeY) > 0.001f;
 	}
 
-	static void drawGhostFootprint(const std::vector<std::pair<float, float>>& centers)
+	void drawGhostFootprint(const std::vector<std::pair<float, float>>& centers)
 	{
 		if (centers.empty()) return;
 
@@ -854,7 +858,7 @@ namespace {
 		}
 	}
 
-	static void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
+	void drawCellOverlay(const std::vector<HexTile>& tiles, const std::vector<int>& cells,
 								float r, float g, float b, bool filled)
 	{
 		for (int ci : cells) {
@@ -875,7 +879,7 @@ namespace {
 		}
 	}
 
-	static void drawPieceState(const PieceState& p, bool selected, bool dragging)
+	void drawPieceState(const PieceState& p, bool selected, bool dragging)
 	{
 		const float fillR = drawR * 1.015f;
 		auto centers = pieceCenters(p);
@@ -914,7 +918,7 @@ namespace {
 		}
 	}
 
-	static void drawPieces(const AppState& app)
+	void drawPieces(const AppState& app)
 	{
 		for (int i = 0; i < static_cast<int>(app.pieces.size()); ++i) {
 			if (app.dragging && i == app.dragPiece) continue;
@@ -925,7 +929,7 @@ namespace {
 		}
 	}
 
-	static void drawVictoryBanner()
+	void drawVictoryBanner()
 	{
 		const float pulse = 0.5f + 0.5f * sinf(static_cast<float>(glfwGetTime()) * 5.0f);
 		glPushMatrix();
@@ -935,7 +939,7 @@ namespace {
 		glPopMatrix();
 	}
 
-	static void drawHelpTooltip(bool showHelp)
+	void drawHelpTooltip(bool showHelp)
 	{
 		if (!showHelp) {
 			glPushMatrix();
@@ -975,7 +979,7 @@ namespace {
 		glPopMatrix();
 	}
 
-	static void cursorPosCallback(GLFWwindow*, double xpos, double ypos)
+	void cursorPosCallback(GLFWwindow*, double xpos, double ypos)
 	{
 		if (gApp == nullptr || !gApp->dragging || gApp->dragPiece < 0) return;
 		auto w = screenToWorld(xpos, ypos);
@@ -985,7 +989,7 @@ namespace {
 		updateDragTarget(*gApp);
 	}
 
-	static void mouseButtonCallback(GLFWwindow* window, int button, int action, int)
+	void mouseButtonCallback(GLFWwindow* window, int button, int action, int)
 	{
 		if (gApp == nullptr || button != GLFW_MOUSE_BUTTON_LEFT) return;
 
@@ -1055,7 +1059,7 @@ namespace {
 		}
 	}
 
-	static void transformSelectedPiece(GLFWwindow* window, PieceTransform tr)
+	void transformSelectedPiece(GLFWwindow* window, PieceTransform tr)
 	{
 		if (gApp == nullptr || gApp->selectedPiece < 0) return;
 		int pieceIndex = gApp->dragging ? gApp->dragPiece : gApp->selectedPiece;
@@ -1075,7 +1079,7 @@ namespace {
 		}
 	}
 
-	static void keyCallback(GLFWwindow* window, int key, int, int action, int mods)
+	void keyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	{
 		if (gApp == nullptr || action != GLFW_PRESS) return;
 		const bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;

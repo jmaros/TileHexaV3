@@ -8,8 +8,6 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 
 add_executable(TileHexaV3
-    TableManager.cpp
-    ButtonHandler.cpp
     Hexa3DApp.cpp
     TileSolver.cpp
 )

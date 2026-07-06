@@ -6,6 +6,7 @@
 #include <cmath>
 #include <ctime>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <array>
 #include <vector>
@@ -148,7 +149,7 @@ namespace {
 			case CT_MONTH: { r *= 0.8f; g *= 0.8f; b *= 0.8f; text = monthNames[content.value - 1]; } break;
 			case CT_WDAY: { r *= 0.6f; g *= 0.6f; b *= 0.6f; text = weekNames[content.value]; } break;
 			case CT_DATE: { r *= 0.4f; g *= 0.4f; b *= 0.4f; snprintf(text.data(), text.size(), "%d", content.value); } break;
-			case CT_EMPTY: { r = 0.82f; g = 0.74f; b = 0.18f; } break; // empty playable cell: no text, yellow-brown shade
+			case CT_EMPTY: { r = 0.10f; g = 0.68f; b = 0.70f; } break; // empty playable cell: no text, turquoise blue shade
 			case CT_BASE: { r = 1.0f; g = 1.0f; b = 0.0f; } break;
 		}
 		// Filled polygon – pushed back slightly so the border line renders on top
@@ -927,6 +928,15 @@ namespace {
 		updateDragTarget(*gApp);
 	}
 
+	// The framebuffer can differ in size from the logical window (HiDPI /
+	// content scaling, e.g. under WSLg), so the viewport must always track
+	// the real framebuffer size or the scene renders into a small corner.
+	void framebufferSizeCallback(GLFWwindow*, int width, int height)
+	{
+		if (width <= 0 || height <= 0) return;
+		glViewport(0, 0, width, height);
+	}
+
 	void mouseButtonCallback(GLFWwindow* window, int button, int action, int)
 	{
 		if (gApp == nullptr || button != GLFW_MOUSE_BUTTON_LEFT) return;
@@ -1078,8 +1088,12 @@ namespace {
 
 int main()
 {
+	glfwSetErrorCallback([](int code, const char* description) {
+		fprintf(stderr, "GLFW error %d: %s\n", code, description ? description : "(null)");
+	});
 
 	if (!glfwInit()) {
+		fprintf(stderr, "glfwInit() failed. Check WSLg/X11 display configuration.\n");
 		return -1;
 	}
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
@@ -1087,11 +1101,15 @@ int main()
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	GLFWwindow* window = glfwCreateWindow(WINDOW_W, WINDOW_H, "3D Hex Board", nullptr, nullptr);
 	if (!window) {
+		fprintf(stderr, "glfwCreateWindow() failed. No OpenGL window/context available.\n");
 		glfwTerminate();
 		return -1;
 	}
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(1); // Enable VSync
+	glfwShowWindow(window);
+	glfwFocusWindow(window);
+	fprintf(stderr, "Window created: %dx%d\n", WINDOW_W, WINDOW_H);
 #ifdef _WIN32
 	FONT_BASE = glGenLists(96);
 	HFONT hFont = CreateFont(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -1104,7 +1122,15 @@ int main()
 	DeleteObject(hFont);
 #endif
 
-	glViewport(0, 0, WINDOW_W, WINDOW_H);
+	// The framebuffer can be larger than the requested window size (e.g. HiDPI
+	// scaling under WSLg/Wayland), so the viewport must use the actual
+	// framebuffer size instead of the logical WINDOW_W/WINDOW_H, otherwise the
+	// scene only renders into a small corner of the real drawable surface.
+	int fbWidth = WINDOW_W;
+	int fbHeight = WINDOW_H;
+	glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+	fprintf(stderr, "Framebuffer size: %dx%d\n", fbWidth, fbHeight);
+	glViewport(0, 0, fbWidth, fbHeight);
 	glEnable(GL_DEPTH_TEST);
 	glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
 
@@ -1170,6 +1196,7 @@ int main()
 	glfwSetCursorPosCallback(window, cursorPosCallback);
 	glfwSetMouseButtonCallback(window, mouseButtonCallback);
 	glfwSetKeyCallback(window, keyCallback);
+	glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 
 	char title[128];
 	snprintf(title, sizeof(title), "3D Hex Board - %04d-%02d-%02d %s",
@@ -1181,6 +1208,8 @@ int main()
 	glLoadIdentity();
 	setPerspective(45.0f, static_cast<float>(WINDOW_W) / static_cast<float>(WINDOW_H), 1.0f, 100.0f);
 	// Main loop
+	int frameCounter = 0;
+	const char* dumpFrameEnv = std::getenv("TILEHEXA_DUMP_FRAME");
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1209,9 +1238,32 @@ int main()
 		drawPieces(app);
 		drawStatusBanner(app);
 		drawHelpTooltip(app.showHelp);
+
+		++frameCounter;
+		if (dumpFrameEnv != nullptr && frameCounter == 10) {
+			int fbWidth = 0, fbHeight = 0;
+			glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+			std::vector<unsigned char> pixels(static_cast<size_t>(fbWidth) * fbHeight * 3);
+			glReadBuffer(GL_BACK);
+			glPixelStorei(GL_PACK_ALIGNMENT, 1);
+			glReadPixels(0, 0, fbWidth, fbHeight, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+			FILE* fp = fopen("/tmp/tilehexa_dump.ppm", "wb");
+			if (fp != nullptr) {
+				fprintf(fp, "P6\n%d %d\n255\n", fbWidth, fbHeight);
+				// OpenGL rows are bottom-to-top; PPM expects top-to-bottom.
+				for (int row = fbHeight - 1; row >= 0; --row) {
+					fwrite(pixels.data() + static_cast<size_t>(row) * fbWidth * 3, 1, static_cast<size_t>(fbWidth) * 3, fp);
+				}
+				fclose(fp);
+				fprintf(stderr, "Dumped frame %d (%dx%d) to /tmp/tilehexa_dump.ppm\n", frameCounter, fbWidth, fbHeight);
+			}
+			glfwSetWindowShouldClose(window, 1);
+		}
+
 		glfwSwapBuffers(window);
 		executePendingSolve(app); // runs after the label frame is displayed
 	}
+	fprintf(stderr, "Main loop exited.\n");
 #ifdef _WIN32
 	glDeleteLists(FONT_BASE, 96);
 #endif

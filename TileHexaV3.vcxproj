@@ -53,18 +53,15 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ItemGroup>
-    <ClCompile Include="TableManager.cpp" />
-    <ClCompile Include="ButtonHandler.cpp" />
     <ClCompile Include="Hexa3DApp.cpp" />
     <ClCompile Include="TileSolver.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="TableManager.h" />
-    <ClInclude Include="ButtonHandler.h" />
     <ClInclude Include="TileSolver.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vcpkg.json" />
+    <None Include="wsl_cleanup.sh" />
   </ItemGroup>
   <ItemDefinitionGroup>
     <Link>
